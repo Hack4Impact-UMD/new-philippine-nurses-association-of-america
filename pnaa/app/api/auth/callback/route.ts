@@ -31,9 +31,10 @@ export async function GET(request: NextRequest) {
 
     const email = contact.Email;
     const displayName = `${contact.FirstName} ${contact.LastName}`.trim();
-    const chapterName = extractFieldValue(contact, "Chapter (Active/Associate - 1 year)");
-    const region = extractFieldValue(contact, "PNAA Region");
-    const memberId = extractFieldValue(contact, "Member ID");
+    const chapterName = "National";
+    const region = "National";
+    const memberId = "1111";
+
 
     // Find or create Firebase Auth user
     let firebaseUser;
