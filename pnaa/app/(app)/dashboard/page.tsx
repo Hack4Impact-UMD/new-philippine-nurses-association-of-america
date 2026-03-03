@@ -35,6 +35,7 @@ export default function DashboardPage() {
     "events",
     eventConstraints
   );
+  
 
   const campaignConstraints = useMemo(
     () => [where("archived", "==", false), orderBy("date", "desc"), limit(5)],
