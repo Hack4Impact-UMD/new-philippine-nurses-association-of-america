@@ -13,6 +13,7 @@ import { EventCard } from "@/components/events/event-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Users, Building2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { SubchapterList } from "@/components/subchapters/subchapter-list";
 import type { Chapter } from "@/types/chapter";
 import type { Member } from "@/types/member";
 import type { AppEvent } from "@/types/event";
@@ -167,6 +168,7 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
           <TabsTrigger value="fundraising">Fundraising</TabsTrigger>
+          <TabsTrigger value="subchapters">Subchapters</TabsTrigger>
         </TabsList>
 
         <TabsContent value="members" className="mt-4">
@@ -235,6 +237,10 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="subchapters" className="mt-4">
+          <SubchapterList chapterId={chapterId} />
         </TabsContent>
       </Tabs>
     </div>

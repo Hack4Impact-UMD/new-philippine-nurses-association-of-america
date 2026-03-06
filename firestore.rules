@@ -14,12 +14,16 @@ service cloud.firestore {
       return getUserRole() == 'national_admin';
     }
 
+    function isRegionAdmin() {
+      return getUserRole() == 'region_admin';
+    }
+
     function isChapterAdmin() {
       return getUserRole() == 'chapter_admin';
     }
 
     function isAdmin() {
-      return isNationalAdmin() || isChapterAdmin();
+      return isNationalAdmin() || isRegionAdmin() || isChapterAdmin();
     }
 
     // Members: read-only for authenticated users
@@ -44,6 +48,14 @@ service cloud.firestore {
 
     // Fundraising: read for authed, create/update for admins
     match /fundraising/{campaignId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isAdmin();
+      allow update: if isAuthenticated() && isAdmin();
+      allow delete: if false; // Soft delete only
+    }
+
+    // Subchapters: read for authed, create/update for admins
+    match /subchapters/{subchapterId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isAdmin();
       allow update: if isAuthenticated() && isAdmin();

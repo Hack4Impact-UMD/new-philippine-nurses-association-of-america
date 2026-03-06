@@ -55,9 +55,11 @@ export function AppSidebar() {
   const roleBadge =
     user?.role === "national_admin"
       ? "National Admin"
-      : user?.role === "chapter_admin"
-        ? "Chapter Admin"
-        : "Member";
+      : user?.role === "region_admin"
+        ? "Region Admin"
+        : user?.role === "chapter_admin"
+          ? "Chapter Admin"
+          : "Member";
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
