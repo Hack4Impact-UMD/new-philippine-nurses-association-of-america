@@ -2,7 +2,14 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies:
+
+```bash
+cd pnaa
+npm install
+```
+
+Run the development server (uses `.env.local` which uses **production** Firebase by default):
 
 ```bash
 npm run dev
@@ -16,21 +23,40 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environments (prod vs staging)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This app can talk to either the **production** or **staging** Firebase project, depending on which env file/script you use.
 
-## Learn More
+- `.env.local` → points to **production** Firebase (`pnaa-chapter-management`).
+- `.env.staging.local` → points to **staging** Firebase (`pnaa-chaptermanagement-staging`).
 
-To learn more about Next.js, take a look at the following resources:
+#### Run against production (default)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Ensure `pnaa/.env.local` contains the **production** Firebase credentials.
+2. Start dev server:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+   ```bash
+   npm run dev
+   ```
 
-## Deploy on Vercel
+### Run against staging
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Using a dedicated script:**
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+  Ensure `pnaa/.env.staging.local` contains the **staging** Firebase credentials.
+
+  ```bash
+  # package.json script
+  # "dev:staging": "env-cmd -f .env.staging.local next dev"
+
+  npm run dev:staging
+  ```
+
+<!-- - **Temporarily copy the staging env over:**
+
+  ```bash
+  cp .env.staging.local .env.local
+  npm run dev
+  ```
+
+  Remember to restore `.env.local` with production values when you want to point back to prod. -->
