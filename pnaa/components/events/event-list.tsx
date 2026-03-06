@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCollection } from "@/hooks/use-firestore";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy, limit } from "firebase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { EventCard } from "./event-card";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -200,6 +200,7 @@ export function EventList() {
     } else {
       c.push(orderBy("startDate", "desc"));
     }
+    c.push(limit(500));
     return c;
   }, [filterMode, showArchived, today]);
 
