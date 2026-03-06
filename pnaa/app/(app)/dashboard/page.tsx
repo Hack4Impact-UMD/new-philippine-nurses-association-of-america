@@ -12,7 +12,6 @@ import { PageHeader } from "@/components/shared/page-header";
 import type { Chapter } from "@/types/chapter";
 import type { AppEvent } from "@/types/event";
 import type { FundraisingCampaign } from "@/types/fundraising";
-import type { Member } from "@/types/member";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -20,7 +19,6 @@ export default function DashboardPage() {
   const today = new Date().toISOString().split("T")[0];
 
   const { data: chapters } = useCollection<Chapter>("chapters");
-  const { data: members } = useCollection<Member>("members");
 
   const eventConstraints = useMemo(
     () => [
@@ -47,18 +45,17 @@ export default function DashboardPage() {
   );
 
   const stats = useMemo(() => {
-    const activeMembers = members.filter(
-      (m) => m.activeStatus === "Active"
-    ).length;
+    const totalMembers = chapters.reduce((sum, c) => sum + (c.totalMembers ?? 0), 0);
+    const activeMembers = chapters.reduce((sum, c) => sum + (c.totalActive ?? 0), 0);
     return {
-      totalMembers: members.length,
+      totalMembers,
       activeMembers,
-      lapsedMembers: members.length - activeMembers,
+      lapsedMembers: totalMembers - activeMembers,
       totalChapters: chapters.length,
       upcomingEvents: upcomingEvents.length,
       totalFundraised: campaigns.reduce((sum, c) => sum + c.amount, 0),
     };
-  }, [members, chapters, upcomingEvents, campaigns]);
+  }, [chapters, upcomingEvents, campaigns]);
 
   return (
     <div className="space-y-6">
