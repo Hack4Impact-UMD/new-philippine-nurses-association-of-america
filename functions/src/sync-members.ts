@@ -40,6 +40,28 @@ function extractFieldValue(
   return String(field.Value);
 }
 
+function extractChapterName(
+  fieldValues: Array<{ FieldName: string; Value: unknown }>
+): string {
+  const chapterFields = fieldValues.filter((f) =>
+    f.FieldName.startsWith("Chapter")
+  );
+  for (const field of chapterFields) {
+    if (field.Value === null || field.Value === undefined) continue;
+    let value: string;
+    if (
+      typeof field.Value === "object" &&
+      "Label" in (field.Value as Record<string, unknown>)
+    ) {
+      value = (field.Value as { Label: string }).Label;
+    } else {
+      value = String(field.Value);
+    }
+    if (value) return value;
+  }
+  return "";
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -172,10 +194,7 @@ export const syncMembers = onSchedule(
         email: String(contact.Email || ""),
         membershipLevel,
         renewalDueDate,
-        chapterName: extractFieldValue(
-          fieldValues,
-          "Chapter (Active/Associate - 1 year)"
-        ),
+        chapterName: extractChapterName(fieldValues),
         highestEducation: extractFieldValue(
           fieldValues,
           "Highest Level of Education"
