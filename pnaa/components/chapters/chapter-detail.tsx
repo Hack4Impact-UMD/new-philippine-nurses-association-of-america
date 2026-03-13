@@ -164,12 +164,16 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
 
       {/* Tabs */}
       <Tabs defaultValue="members">
-        <TabsList>
-          <TabsTrigger value="members">Members</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
-          <TabsTrigger value="fundraising">Fundraising</TabsTrigger>
-          <TabsTrigger value="subchapters">Subchapters</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-3">
+          <TabsList>
+            <TabsTrigger value="members">Members</TabsTrigger>
+            <TabsTrigger value="events">Events</TabsTrigger>
+            <TabsTrigger value="fundraising">Fundraising</TabsTrigger>
+          </TabsList>
+          <TabsList>
+            <TabsTrigger value="subchapters">Subchapters</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="members" className="mt-4">
           <DataTable
