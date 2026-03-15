@@ -55,6 +55,7 @@ const columns: ColumnDef<ChapterRow, unknown>[] = [
     header: "Total Members",
     size: 130,
     enableSorting: true,
+    meta: { filterType: "numeric" } satisfies ColumnMeta,
     cell: ({ row }) => (
       <span className="font-semibold tabular-nums">
         {row.original.totalMembers.toLocaleString()}
@@ -66,6 +67,7 @@ const columns: ColumnDef<ChapterRow, unknown>[] = [
     header: "Active",
     size: 100,
     enableSorting: true,
+    meta: { filterType: "numeric" } satisfies ColumnMeta,
     cell: ({ row }) => (
       <Badge
         variant="outline"
@@ -80,6 +82,7 @@ const columns: ColumnDef<ChapterRow, unknown>[] = [
     header: "Lapsed",
     size: 100,
     enableSorting: true,
+    meta: { filterType: "numeric" } satisfies ColumnMeta,
     cell: ({ row }) => (
       <Badge
         variant="outline"
@@ -94,6 +97,7 @@ const columns: ColumnDef<ChapterRow, unknown>[] = [
     header: "Active Rate",
     size: 140,
     enableSorting: true,
+    meta: { filterType: "numeric" } satisfies ColumnMeta,
     accessorFn: (row) =>
       row.totalMembers > 0
         ? Math.round((row.totalActive / row.totalMembers) * 100)
@@ -174,6 +178,7 @@ export function ChapterList() {
           emptyDescription="No chapters are available"
           emptyIcon={Building2}
           defaultPageSize={20}
+          defaultColumnFilters={[{ id: "totalActive", value: { op: ">", value: 0 } }]}
         />
       ) : loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

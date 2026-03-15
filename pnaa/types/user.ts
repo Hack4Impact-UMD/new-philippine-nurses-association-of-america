@@ -1,6 +1,6 @@
 import { Timestamp } from "firebase/firestore";
 
-export type UserRole = "national_admin" | "chapter_admin" | "member";
+export type UserRole = "national_admin" | "region_admin" | "chapter_admin" | "member";
 
 export interface AppUser {
   email: string;

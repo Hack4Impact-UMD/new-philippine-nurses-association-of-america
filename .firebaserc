@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "pnaa-chapter-management"
+    "default": "pnaa-chapter-management",
+    "staging": "pnaa-chaptermanagement-staging"
   }
 }

@@ -25,34 +25,57 @@ exports.syncEvents = (0, scheduler_1.onSchedule)({ schedule: "every 1 minutes", 
     const db = (0, firestore_1.getFirestore)();
     const accessToken = await getWAToken();
     const accountId = WA_ACCOUNT_ID.value();
-    const eventsUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/events`;
-    const response = await fetch(eventsUrl, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: "application/json",
-        },
-    });
-    if (!response.ok) {
-        console.error(`WA events fetch failed: ${response.statusText}`);
-        return;
+    // Paginate through all WA events (stop when page < PAGE_SIZE = last page)
+    const PAGE_SIZE = 100;
+    let skip = 0;
+    const allWAEvents = [];
+    while (true) {
+        const url = `https://api.wildapricot.org/v2/accounts/${accountId}/events` +
+            `?$top=${PAGE_SIZE}&$skip=${skip}`;
+        const response = await fetch(url, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                Accept: "application/json",
+            },
+        });
+        if (!response.ok) {
+            console.error(`WA events fetch failed at skip=${skip}: ${response.statusText}`);
+            break;
+        }
+        const data = await response.json();
+        // WA events API may return a plain array or { Events: [...] }
+        if (Array.isArray(data)) {
+            allWAEvents.push(...data);
+            break;
+        }
+        const events = data.Events || [];
+        if (events.length === 0)
+            break;
+        allWAEvents.push(...events);
+        skip += events.length;
+        if (events.length < PAGE_SIZE)
+            break; // last page
     }
-    const data = await response.json();
-    const events = data.Events || data || [];
+    // Load all existing event IDs from Firestore in one query (avoids N reads in the loop)
+    const existingSnapshot = await db.collection("events").get();
+    const existingIds = new Set(existingSnapshot.docs.map((doc) => doc.id));
+    // Batch write only new events (INSERT ONLY — never overwrite existing)
+    let batch = db.batch();
+    let batchCount = 0;
     let added = 0;
     let skipped = 0;
-    for (const event of events) {
+    for (const event of allWAEvents) {
         const eventId = String(event.Id);
-        const docRef = db.collection("events").doc(eventId);
-        const existing = await docRef.get();
-        // INSERT ONLY — never overwrite existing events
-        if (existing.exists) {
+        if (existingIds.has(eventId)) {
             skipped++;
             continue;
         }
         const startDate = event.StartDate
-            ? event.StartDate.split("T")[0]
+            ? String(event.StartDate).split("T")[0]
             : "";
-        const endDate = event.EndDate ? event.EndDate.split("T")[0] : startDate;
+        const endDate = event.EndDate
+            ? String(event.EndDate).split("T")[0]
+            : startDate;
         const eventData = {
             id: eventId,
             name: event.Name || "",
@@ -76,8 +99,18 @@ exports.syncEvents = (0, scheduler_1.onSchedule)({ schedule: "every 1 minutes", 
             lastUpdated: firestore_1.Timestamp.now(),
             creationDate: firestore_1.Timestamp.now(),
         };
-        await docRef.set(eventData);
+        const docRef = db.collection("events").doc(eventId);
+        batch.set(docRef, eventData);
+        batchCount++;
         added++;
+        if (batchCount === 450) {
+            await batch.commit();
+            batch = db.batch();
+            batchCount = 0;
+        }
+    }
+    if (batchCount > 0) {
+        await batch.commit();
     }
     console.log(`syncEvents: ${added} new events added, ${skipped} skipped (already exist)`);
 });

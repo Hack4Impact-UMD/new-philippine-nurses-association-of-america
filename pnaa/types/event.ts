@@ -29,6 +29,9 @@ export interface AppEvent {
   contactHours: number;
   volunteerHours: number;
 
+  // Subchapter association (optional)
+  subchapterId?: string;
+
   // Metadata
   source: "wildapricot" | "app";
   lastUpdatedUser: string;

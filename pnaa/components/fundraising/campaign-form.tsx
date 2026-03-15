@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -42,14 +42,18 @@ interface CampaignFormProps {
 
 export function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const subchapterId = searchParams.get("subchapterId") || undefined;
+  const chapterFromParams = searchParams.get("chapterName") || "";
 
   const form = useForm<CampaignFormValues>({
     resolver: zodResolver(campaignSchema),
     defaultValues: {
       fundraiserName: campaign?.fundraiserName || "",
-      chapterName: campaign?.chapterName || user?.chapterName || "",
+      chapterName: campaign?.chapterName || chapterFromParams || user?.chapterName || "",
       date: campaign?.date || new Date().toISOString().split("T")[0],
       amount: campaign?.amount || 0,
       note: campaign?.note || "",
@@ -71,6 +75,7 @@ export function CampaignForm({ campaign, mode }: CampaignFormProps) {
         const docId = await addDocument("fundraising", {
           ...data,
           creationDate: Timestamp.now(),
+          ...(subchapterId ? { subchapterId } : {}),
         });
         toast.success("Campaign created successfully");
         router.push(`/fundraising/${docId}`);

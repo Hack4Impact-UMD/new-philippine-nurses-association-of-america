@@ -5,7 +5,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 interface CreateUserData {
   email: string;
   displayName: string;
-  role: "national_admin" | "chapter_admin" | "member";
+  role: "national_admin" | "region_admin" | "chapter_admin" | "member";
   chapterName?: string;
   region?: string;
 }
@@ -54,6 +54,7 @@ export const createUser = onCall(async (request) => {
     await auth.setCustomUserClaims(userRecord.uid, {
       role,
       chapterName: chapterName || null,
+      region: region || null,
     });
 
     return { uid: userRecord.uid, success: true };

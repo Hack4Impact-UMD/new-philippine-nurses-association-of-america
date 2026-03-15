@@ -1,42 +1,80 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useDocument, useCollection } from "@/hooks/use-firestore";
 import { where, orderBy } from "firebase/firestore";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DataTable, type Column } from "@/components/shared/data-table";
+import { Button } from "@/components/ui/button";
+import { AdvancedDataTable, type ColumnDef, type ColumnMeta } from "@/components/shared/advanced-data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EventCard } from "@/components/events/event-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Users, Building2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { parseISO, subYears, isAfter } from "date-fns";
+import { SubchapterList } from "@/components/subchapters/subchapter-list";
 import type { Chapter } from "@/types/chapter";
 import type { Member } from "@/types/member";
 import type { AppEvent } from "@/types/event";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
-const memberColumns: Column<Member & { id: string }>[] = [
-  { key: "name", header: "Name", sortable: true },
-  { key: "email", header: "Email", sortable: true },
-  { key: "membershipLevel", header: "Level", sortable: true },
-  { key: "highestEducation", header: "Education" },
+type MemberRow = Member & { id: string };
+
+const memberColumns: ColumnDef<MemberRow, unknown>[] = [
   {
-    key: "renewalDueDate",
-    header: "Renewal Date",
-    sortable: true,
-    render: (m) => formatDate(m.renewalDueDate),
+    accessorKey: "name",
+    header: "Name",
+    size: 200,
+    enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
+    cell: ({ row }) => <span className="font-medium text-sm">{row.original.name}</span>,
   },
   {
-    key: "activeStatus",
+    accessorKey: "email",
+    header: "Email",
+    size: 220,
+    enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
+    cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.original.email}</span>,
+  },
+  {
+    accessorKey: "membershipLevel",
+    header: "Level",
+    size: 150,
+    enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
+    cell: ({ row }) => <span className="text-sm">{row.original.membershipLevel}</span>,
+  },
+  {
+    accessorKey: "highestEducation",
+    header: "Education",
+    size: 160,
+    cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.original.highestEducation}</span>,
+  },
+  {
+    accessorKey: "renewalDueDate",
+    header: "Renewal Date",
+    size: 130,
+    enableSorting: true,
+    cell: ({ row }) => <span className="text-sm">{formatDate(row.original.renewalDueDate)}</span>,
+  },
+  {
+    accessorKey: "activeStatus",
     header: "Status",
-    sortable: true,
-    render: (m) => (
-      <StatusBadge
-        variant={m.activeStatus === "Active" ? "active" : "lapsed"}
-      />
+    size: 100,
+    enableSorting: true,
+    meta: {
+      filterType: "select",
+      filterOptions: [
+        { label: "Active", value: "Active" },
+        { label: "Lapsed", value: "Lapsed" },
+      ],
+    } satisfies ColumnMeta,
+    cell: ({ row }) => (
+      <StatusBadge variant={row.original.activeStatus === "Active" ? "active" : "lapsed"} />
     ),
   },
 ];
@@ -73,10 +111,23 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
     [chapter?.name]
   );
 
+  const [showAllMembers, setShowAllMembers] = useState(false);
+
   const { data: members, loading: membersLoading } = useCollection<Member>(
     "members",
     chapter?.name ? memberConstraints : []
   );
+
+  const filteredMembers = useMemo((): MemberRow[] => {
+    const rows = members as MemberRow[];
+    if (showAllMembers) return rows;
+    const cutoff = subYears(new Date(), 3);
+    return rows.filter(
+      (m) =>
+        m.activeStatus === "Active" ||
+        (m.renewalDueDate && isAfter(parseISO(m.renewalDueDate), cutoff))
+    );
+  }, [members, showAllMembers]);
 
   const { data: events, loading: eventsLoading } = useCollection<AppEvent>(
     "events",
@@ -163,18 +214,33 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
 
       {/* Tabs */}
       <Tabs defaultValue="members">
-        <TabsList>
-          <TabsTrigger value="members">Members</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
-          <TabsTrigger value="fundraising">Fundraising</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-3">
+          <TabsList>
+            <TabsTrigger value="members">Members</TabsTrigger>
+            <TabsTrigger value="events">Events</TabsTrigger>
+            <TabsTrigger value="fundraising">Fundraising</TabsTrigger>
+          </TabsList>
+          <TabsList>
+            <TabsTrigger value="subchapters">Subchapters</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="members" className="mt-4">
-          <DataTable
+          <div className="flex justify-end mb-2">
+            <Button
+              variant={showAllMembers ? "default" : "outline"}
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setShowAllMembers((v) => !v)}
+            >
+              {showAllMembers ? "Showing all members" : "Show old lapsed"}
+            </Button>
+          </div>
+          <AdvancedDataTable<MemberRow>
             columns={memberColumns}
-            data={members}
+            data={filteredMembers}
             loading={membersLoading}
-            emptyMessage="No members found"
+            emptyTitle="No members found"
             emptyDescription="No members are assigned to this chapter"
           />
         </TabsContent>
@@ -235,6 +301,10 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="subchapters" className="mt-4">
+          <SubchapterList chapterId={chapterId} />
         </TabsContent>
       </Tabs>
     </div>

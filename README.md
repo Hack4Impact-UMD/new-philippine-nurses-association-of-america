@@ -12,6 +12,7 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 - [Authentication Flow](#authentication-flow)
 - [Project Structure](#project-structure)
 - [Environment Variables](#environment-variables)
+- [Staging Environment](#staging-environment)
 - [Getting Started](#getting-started)
 - [Firebase Cloud Functions](#firebase-cloud-functions)
 - [Roles & Permissions](#roles--permissions)
@@ -67,17 +68,17 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Next.js App                          │
-│  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐ │
-│  │ Dashboard│  │  Events  │  │ Fundraising│  │ Chapters │ │
-│  └──────────┘  └──────────┘  └────────────┘  └──────────┘ │
+│  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐   │
+│  │ Dashboard│  │  Events  │  │ Fundraising│  │ Chapters │   │
+│  └──────────┘  └──────────┘  └────────────┘  └──────────┘   │
 │                     │ Real-time listeners                   │
 └─────────────────────┼───────────────────────────────────────┘
                       │
         ┌─────────────┴─────────────┐
-        │         Firestore          │
-        │  members / events /        │
-        │  fundraising / chapters /  │
-        │  users                     │
+        │         Firestore         │
+        │  members / events /       │
+        │  fundraising / chapters / │
+        │  users                    │
         └──────────┬────────────────┘
                    │
      ┌─────────────┴──────────────┐
@@ -193,7 +194,9 @@ philippine-nurses-association-of-america/
 
 ## Environment Variables
 
-Create a `.env.local` file inside `pnaa/`:
+Create a `.env.local` file inside `pnaa/` for **production**:
+A separate Firebase project is used for **staging** so you can test without touching production data. For more details, see [Staging Environment](#staging-environment)
+
 
 ```env
 # Firebase (client-side — public)
@@ -206,9 +209,9 @@ NEXT_PUBLIC_FIREBASE_APP_ID=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 # Firebase Admin (server-side — private)
-FIREBASE_PROJECT_ID=
-FIREBASE_CLIENT_EMAIL=
-FIREBASE_PRIVATE_KEY=
+FIREBASE_ADMIN_PROJECT_ID=
+FIREBASE_ADMIN_CLIENT_EMAIL=
+FIREBASE_ADMIN_PRIVATE_KEY=
 
 # Wild Apricot OAuth
 WILD_APRICOT_CLIENT_ID=
@@ -218,6 +221,82 @@ WILD_APRICOT_DOMAIN=
 ```
 
 Firebase Admin credentials are required for the OAuth callback route (issues custom tokens). Obtain them from a Firebase service account JSON file.
+
+---
+
+## Staging environment
+
+A separate Firebase project is used for **staging** so you can test without touching production data.
+
+- **Production Firebase project ID**: `pnaa-chapter-management`
+- **Staging Firebase project ID**: `pnaa-chaptermanagement-staging`
+
+### Firebase project aliases
+
+The repo uses Firebase CLI aliases defined in `.firebaserc`:
+
+```json
+{
+  "projects": {
+    "default": "pnaa-chapter-management",
+    "staging": "pnaa-chaptermanagement-staging"
+  }
+}
+```
+
+From the repo root:
+
+```bash
+# Use production for deploys
+firebase use default
+
+# Use staging for deploys
+firebase use staging
+```
+
+On the free plan, **only Firestore** is deployed to staging as of now:
+
+- `firebase deploy --only firestore` works for both prod and staging.
+- `firebase deploy --only functions` and `--only storage` require the Blaze plan on the target project, so Functions and Storage are **not deployed** to staging as of now.
+
+### App environments (Next.js)
+
+Inside `pnaa/`:
+
+- `.env.local` → points to **production** Firebase.
+- `.env.staging.local` → points to **staging** Firebase (`pnaa-chaptermanagement-staging`).
+
+Typical workflows:
+
+- **Run app against production** (local):
+
+  - Ensure `.env.local` has production values.
+  - Run:
+
+    ```bash
+    cd pnaa
+    npm run dev
+    ```
+
+- **Run app against staging** (local):
+
+  - Ensure `.env.staging.local` exists with staging values.
+  - Either temporarily copy it over:
+
+    ```bash
+    cd pnaa
+    cp .env.staging.local .env.local
+    npm run dev
+    ```
+
+  - Or, if using `env-cmd`, run the dedicated staging script:
+
+    ```bash
+    cd pnaa
+    npm run dev:staging
+    ```
+
+When the app is using staging, all Firestore/Auth operations go to the **staging** Firebase project; production continues to use its own env and project.
 
 ---
 

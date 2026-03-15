@@ -10,7 +10,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/chapters") ||
     pathname.startsWith("/events") ||
     pathname.startsWith("/fundraising") ||
-    pathname.startsWith("/about")
+    pathname.startsWith("/about") ||
+    pathname.startsWith("/users")
   ) {
     if (!token) {
       return NextResponse.redirect(new URL("/signin", request.url));
@@ -32,6 +33,7 @@ export const config = {
     "/events/:path*",
     "/fundraising/:path*",
     "/about/:path*",
+    "/users/:path*",
     "/signin",
   ],
 };

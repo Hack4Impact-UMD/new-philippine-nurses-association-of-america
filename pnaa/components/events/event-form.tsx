@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -53,9 +53,14 @@ interface EventFormProps {
 
 export function EventForm({ event, mode }: EventFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [posterFile, setPosterFile] = useState<File | null>(null);
+
+  const subchapterId = searchParams.get("subchapterId") || undefined;
+  const chapterFromParams = searchParams.get("chapter") || "";
+  const regionFromParams = searchParams.get("region") || "";
 
   const form = useForm<EventFormValues>({
     resolver: zodResolver(eventSchema),
@@ -66,8 +71,8 @@ export function EventForm({ event, mode }: EventFormProps) {
       startTime: event?.startTime || "",
       endTime: event?.endTime || "",
       location: event?.location || "",
-      chapter: event?.chapter || "",
-      region: event?.region || "",
+      chapter: event?.chapter || chapterFromParams,
+      region: event?.region || regionFromParams,
       about: event?.about || "",
       attendees: event?.attendees || 0,
       volunteers: event?.volunteers || 0,
@@ -104,6 +109,7 @@ export function EventForm({ event, mode }: EventFormProps) {
           ...eventData,
           source: "app" as const,
           creationDate: Timestamp.now(),
+          ...(subchapterId ? { subchapterId } : {}),
         });
 
         if (posterFile) {

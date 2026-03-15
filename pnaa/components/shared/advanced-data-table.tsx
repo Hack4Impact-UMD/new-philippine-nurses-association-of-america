@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -15,6 +15,7 @@ import {
   type VisibilityState,
   type ColumnSizingState,
   type Header,
+  type FilterFn,
 } from "@tanstack/react-table";
 import {
   DndContext,
@@ -81,12 +82,54 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export interface NumericFilterValue {
+  op: ">" | ">=" | "<" | "<=" | "==" | "!=";
+  value: number | "";
+}
+
 export interface ColumnMeta {
-  filterType?: "text" | "select";
+  filterType?: "text" | "select" | "numeric";
   filterOptions?: { label: string; value: string }[];
 }
 
 export type { ColumnDef };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const numericFilterFn: FilterFn<any> = (
+  row,
+  columnId,
+  filterValue: NumericFilterValue,
+) => {
+  if (
+    !filterValue ||
+    filterValue.value === "" ||
+    filterValue.value === undefined
+  )
+    return true;
+  const rowValue = row.getValue<number>(columnId);
+  const num = Number(filterValue.value);
+  if (isNaN(num)) return true;
+  switch (filterValue.op) {
+    case ">":
+      return rowValue > num;
+    case ">=":
+      return rowValue >= num;
+    case "<":
+      return rowValue < num;
+    case "<=":
+      return rowValue <= num;
+    case "==":
+      return rowValue === num;
+    case "!=":
+      return rowValue !== num;
+    default:
+      return true;
+  }
+};
+numericFilterFn.autoRemove = (val: NumericFilterValue) =>
+  !val || val.value === "" || val.value === undefined;
+
+const NUMERIC_OPS = [">", ">=", "<", "<=", "==", "!="] as const;
 
 interface AdvancedDataTableProps<T> {
   columns: ColumnDef<T, unknown>[];
@@ -100,6 +143,7 @@ interface AdvancedDataTableProps<T> {
   globalFilter?: string;
   enableSelection?: boolean;
   onSelectionChange?: (rows: T[]) => void;
+  defaultColumnFilters?: ColumnFiltersState;
 }
 
 // Using `any` for the header generic to avoid JSX generic syntax issues in .tsx
@@ -133,10 +177,28 @@ function DraggableHeaderCell({ header }: { header: Header<any, unknown> }) {
 
   const meta = header.column.columnDef.meta as ColumnMeta | undefined;
   const canFilter = !!meta?.filterType;
-  const currentFilter = header.column.getFilterValue() as string | undefined;
-  const isFiltered = !!currentFilter && currentFilter !== "";
+  const currentFilter = header.column.getFilterValue() as
+    | string
+    | NumericFilterValue
+    | undefined;
+
+  const isFiltered = (() => {
+    if (currentFilter === undefined || currentFilter === null) return false;
+    if (typeof currentFilter === "object") {
+      return (
+        (currentFilter as NumericFilterValue).value !== "" &&
+        (currentFilter as NumericFilterValue).value !== undefined
+      );
+    }
+    return currentFilter !== "";
+  })();
+
   const canSort = header.column.getCanSort();
   const sortDir = header.column.getIsSorted();
+
+  const numFilter = currentFilter as NumericFilterValue | undefined;
+  const currentOp = numFilter?.op ?? ">";
+  const currentNumValue = numFilter?.value ?? "";
 
   return (
     <TableHead ref={setNodeRef} style={style} className="select-none group">
@@ -195,9 +257,62 @@ function DraggableHeaderCell({ header }: { header: Header<any, unknown> }) {
               <p className="text-xs font-semibold mb-2 text-muted-foreground">
                 Filter: {String(header.column.columnDef.header)}
               </p>
-              {meta?.filterType === "select" && meta.filterOptions ? (
+
+              {meta?.filterType === "numeric" ? (
+                <div className="space-y-2">
+                  <Select
+                    value={currentOp}
+                    onValueChange={(op) =>
+                      header.column.setFilterValue({
+                        op: op as NumericFilterValue["op"],
+                        value: currentNumValue,
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {NUMERIC_OPS.map((op) => (
+                        <SelectItem
+                          key={op}
+                          value={op}
+                          className="text-xs font-mono"
+                        >
+                          {op}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex gap-1">
+                    <Input
+                      type="number"
+                      className="h-8 text-xs"
+                      placeholder="Value..."
+                      value={String(currentNumValue)}
+                      onChange={(e) =>
+                        header.column.setFilterValue({
+                          op: currentOp,
+                          value:
+                            e.target.value === "" ? "" : Number(e.target.value),
+                        })
+                      }
+                    />
+                    {isFiltered && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => header.column.setFilterValue(undefined)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : meta?.filterType === "select" && meta.filterOptions ? (
                 <Select
-                  value={currentFilter ?? ""}
+                  value={(currentFilter as string) ?? ""}
                   onValueChange={(v) =>
                     header.column.setFilterValue(
                       v === "__all__" ? undefined : v,
@@ -225,7 +340,7 @@ function DraggableHeaderCell({ header }: { header: Header<any, unknown> }) {
                   <Input
                     className="h-8 text-xs"
                     placeholder="Filter value..."
-                    value={currentFilter ?? ""}
+                    value={(currentFilter as string) ?? ""}
                     onChange={(e) =>
                       header.column.setFilterValue(e.target.value || undefined)
                     }
@@ -274,9 +389,12 @@ export function AdvancedDataTable<T extends object>({
   globalFilter = "",
   enableSelection = true,
   onSelectionChange,
+  defaultColumnFilters,
 }: AdvancedDataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
+    defaultColumnFilters ?? [],
+  );
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -327,9 +445,22 @@ export function AdvancedDataTable<T extends object>({
     return enableSelection ? ["select", ...dataColumnIds] : dataColumnIds;
   });
 
+  // Automatically inject numericFilterFn for columns with filterType: "numeric"
+  const processedColumns = useMemo(
+    () =>
+      columns.map((col) => {
+        const meta = col.meta as ColumnMeta | undefined;
+        if (meta?.filterType === "numeric") {
+          return { ...col, filterFn: numericFilterFn };
+        }
+        return col;
+      }),
+    [columns],
+  );
+
   const table = useReactTable({
     data,
-    columns: effectiveColumns,
+    columns: processedColumns,
     state: {
       sorting,
       columnFilters,
@@ -382,9 +513,16 @@ export function AdvancedDataTable<T extends object>({
     }
   }, []);
 
-  const activeFilters = columnFilters.filter(
-    (f) => f.value !== undefined && f.value !== "",
-  );
+  const activeFilters = columnFilters.filter((f) => {
+    if (f.value === undefined || f.value === null) return false;
+    if (typeof f.value === "object" && "op" in (f.value as object)) {
+      return (
+        (f.value as NumericFilterValue).value !== "" &&
+        (f.value as NumericFilterValue).value !== undefined
+      );
+    }
+    return f.value !== "";
+  });
 
   const filteredCount = table.getFilteredRowModel().rows.length;
   const totalCount = data.length;
@@ -437,16 +575,23 @@ export function AdvancedDataTable<T extends object>({
               {activeFilters.map((filter) => {
                 const col = table.getColumn(filter.id);
                 const header = col?.columnDef.header;
+                const fv = filter.value;
+                const displayValue =
+                  typeof fv === "object" &&
+                  fv !== null &&
+                  "op" in (fv as object)
+                    ? `${(fv as NumericFilterValue).op} ${(fv as NumericFilterValue).value}`
+                    : String(fv);
                 return (
                   <Badge
                     key={filter.id}
-                    variant="secondary"
-                    className="gap-1 pr-1 text-xs h-6"
+                    variant="outline"
+                    className="gap-1 pr-1 text-xs h-6 bg-muted/40 text-muted-foreground border-border/60"
                   >
                     <span className="text-muted-foreground">
                       {String(header ?? filter.id)}:
                     </span>
-                    {String(filter.value)}
+                    {displayValue}
                     <button
                       onClick={() => col?.setFilterValue(undefined)}
                       className="ml-0.5 rounded hover:bg-muted-foreground/20 p-0.5 transition-colors"

@@ -10,6 +10,7 @@ import {
   Info,
   LogOut,
   ChevronLeft,
+  Users,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,7 +28,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth, useIsNationalAdmin } from "@/hooks/use-auth";
 
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -40,6 +41,7 @@ const navItems = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
+  const isNationalAdmin = useIsNationalAdmin();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
 
@@ -55,9 +57,11 @@ export function AppSidebar() {
   const roleBadge =
     user?.role === "national_admin"
       ? "National Admin"
-      : user?.role === "chapter_admin"
-        ? "Chapter Admin"
-        : "Member";
+      : user?.role === "region_admin"
+        ? "Region Admin"
+        : user?.role === "chapter_admin"
+          ? "Chapter Admin"
+          : "Member";
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -107,6 +111,28 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {isNationalAdmin && (
+          <SidebarGroup>
+            <Separator className="bg-sidebar-border mb-2" />
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith("/users")}
+                    tooltip="User Management"
+                  >
+                    <Link href="/users">
+                      <Users className="h-4 w-4" />
+                      <span>User Management</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-4">

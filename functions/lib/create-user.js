@@ -36,6 +36,7 @@ exports.createUser = (0, https_1.onCall)(async (request) => {
         await auth.setCustomUserClaims(userRecord.uid, {
             role,
             chapterName: chapterName || null,
+            region: region || null,
         });
         return { uid: userRecord.uid, success: true };
     }
