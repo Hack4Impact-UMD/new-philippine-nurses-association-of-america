@@ -72,6 +72,7 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Download,
   Filter,
   ChevronLeft,
   ChevronRight,
@@ -144,6 +145,7 @@ interface AdvancedDataTableProps<T> {
   enableSelection?: boolean;
   onSelectionChange?: (rows: T[]) => void;
   defaultColumnFilters?: ColumnFiltersState;
+  exportFilename?: string;
 }
 
 // Using `any` for the header generic to avoid JSX generic syntax issues in .tsx
@@ -389,6 +391,7 @@ export function AdvancedDataTable<T extends object>({
   enableSelection = true,
   onSelectionChange,
   defaultColumnFilters,
+  exportFilename = "export",
 }: AdvancedDataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
@@ -400,6 +403,7 @@ export function AdvancedDataTable<T extends object>({
 
   // The checkbox column, defined here to be defined by Tanstack ColumnDef
   // so that is aware when the rows are reordered.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const selectionColumn: ColumnDef<any, unknown> = {
     id: "select",
     size: 44,
@@ -515,6 +519,43 @@ export function AdvancedDataTable<T extends object>({
     }
   }, []);
 
+  const exportToCSV = useCallback(() => {
+    //format value for CSV, escaping quotes and wrapping in quotes if contains comma/newline
+    const csvEscape = (value: string): string => {
+      const escaped = value.replace(/"/g, '""');
+      return /[",\n\r]/.test(value) ? `"${escaped}"` : escaped;
+    };
+
+    //filters only the visible columns and excludes the selection column
+    const exportColumns = table
+      .getAllColumns()
+      .filter((col) => col.id !== "select" && col.getIsVisible());
+
+    // take each column's header and render it to string, then escape for CSV
+    const headers = exportColumns.map((col) => {
+      const headerProto = col.columnDef.header ?? col.id;
+      const headerText = (typeof headerProto === "string") ? headerProto : col.id;
+      return csvEscape(headerText);
+    });
+    // row accounts for null values by replacing with ""
+    const rows = table.getSelectedRowModel().rows.map((row) =>
+      exportColumns.map((col) => {
+        const val = row.getValue(col.id);
+        return csvEscape(val == null ? "" : String(val));
+      }),
+    );
+
+    //create csv file and trigger download
+    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${exportFilename}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }, [table, exportFilename]);
+
   const activeFilters = columnFilters.filter((f) => {
     if (f.value === undefined || f.value === null) return false;
     if (typeof f.value === "object" && "op" in (f.value as object)) {
@@ -622,34 +663,72 @@ export function AdvancedDataTable<T extends object>({
           )}
         </div>
 
-        {/* Column visibility toggle */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
-              <Settings2 className="h-3.5 w-3.5" />
-              Columns
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuLabel className="text-xs py-1.5">
-              Toggle Columns
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {table
-              .getAllColumns()
-              .filter((col) => col.getCanHide())
-              .map((col) => (
-                <DropdownMenuCheckboxItem
-                  key={col.id}
-                  className="text-xs"
-                  checked={col.getIsVisible()}
-                  onCheckedChange={(v) => col.toggleVisibility(!!v)}
+        {/* Right-side actions */}
+
+        <div className="flex items-center gap-2">
+          {enableSelection && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-1.5 h-8 text-xs"
+                  disabled={selectedCount === 0}
                 >
-                  {String(col.columnDef.header ?? col.id)}
-                </DropdownMenuCheckboxItem>
-              ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-3" align="start">
+                <p className="text-xs font-semibold mb-2 text-muted-foreground">
+                  Export selected rows and visible columns
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start text-xs gap-1.5"
+                  onClick={() => {
+                    exportToCSV();
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export to CSV file
+                </Button>
+              </PopoverContent>
+            </Popover>
+          )}
+          {/* Column visibility toggle */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Columns
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuLabel className="text-xs py-1.5">
+                Toggle Columns
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {table
+                .getAllColumns()
+                .filter((col) => col.getCanHide())
+                .map((col) => (
+                  <DropdownMenuCheckboxItem
+                    key={col.id}
+                    className="text-xs"
+                    checked={col.getIsVisible()}
+                    onCheckedChange={(v) => col.toggleVisibility(!!v)}
+                  >
+                    {String(col.columnDef.header ?? col.id)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* Table — outer div clips border-radius; scroll is handled by Table's internal container */}
