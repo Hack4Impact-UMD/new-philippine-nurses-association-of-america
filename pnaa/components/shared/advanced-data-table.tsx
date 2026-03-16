@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -149,11 +149,10 @@ interface AdvancedDataTableProps<T> {
 // Using `any` for the header generic to avoid JSX generic syntax issues in .tsx
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function DraggableHeaderCell({ header }: { header: Header<any, unknown> }) {
-  // Always call useSortable — hooks must not be called conditionally
   const { attributes, isDragging, listeners, setNodeRef, transform } =
     useSortable({ id: header.column.id });
 
-  // The select column is not draggable — render a plain static header cell
+  // Only the select column is not draggable (fixed to the far left)
   if (header.column.id === "select") {
     return (
       <TableHead
@@ -399,8 +398,8 @@ export function AdvancedDataTable<T extends object>({
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
-  // The checkbox column, defined here so it can use TanStack's header/cell context
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // The checkbox column, defined here to be defined by Tanstack ColumnDef
+  // so that is aware when the rows are reordered.
   const selectionColumn: ColumnDef<any, unknown> = {
     id: "select",
     size: 44,
@@ -408,6 +407,7 @@ export function AdvancedDataTable<T extends object>({
     enableHiding: false,
     enableResizing: false,
     header: ({ table }) => (
+      //checkbox value differs based on whether all or none of rows selected
       <Checkbox
         checked={
           table.getIsAllRowsSelected()
@@ -416,6 +416,7 @@ export function AdvancedDataTable<T extends object>({
               ? "indeterminate"
               : false
         }
+        //select all rows currently filtered.
         onCheckedChange={(v) => table.toggleAllRowsSelected(!!v)}
         aria-label="Select all filtered rows"
       />
@@ -430,9 +431,10 @@ export function AdvancedDataTable<T extends object>({
     ),
   };
 
-  const effectiveColumns = enableSelection
-    ? [selectionColumn, ...columns]
-    : columns;
+  //Add the selection column at start only if selection is enabled
+  if (enableSelection) {
+    columns = [selectionColumn, ...columns];
+  }
 
   const [columnOrder, setColumnOrder] = useState<string[]>(() => {
     const dataColumnIds = columns
@@ -683,7 +685,7 @@ export function AdvancedDataTable<T extends object>({
                 {table.getRowModel().rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={effectiveColumns.length}
+                      colSpan={columns.length}
                       className="h-24 text-center text-muted-foreground text-sm"
                     >
                       No results match your filters.
