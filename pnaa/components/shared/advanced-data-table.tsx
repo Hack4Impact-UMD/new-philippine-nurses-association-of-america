@@ -534,13 +534,19 @@ export function AdvancedDataTable<T extends object>({
     // take each column's header and render it to string, then escape for CSV
     const headers = exportColumns.map((col) => {
       const headerProto = col.columnDef.header ?? col.id;
-      const headerText = (typeof headerProto === "string") ? headerProto : col.id;
+      const headerText = typeof headerProto === "string" ? headerProto : col.id;
       return csvEscape(headerText);
     });
-    // row accounts for null values by replacing with ""
+    // row accounts for null values by replacing with empty string
+    // special case: status columns map false → "active" and true → "archived"
     const rows = table.getSelectedRowModel().rows.map((row) =>
       exportColumns.map((col) => {
         const val = row.getValue(col.id);
+        const header = col.columnDef.header ?? col.id;
+        const headerText = typeof header === "string" ? header : col.id;
+        if (headerText.toLowerCase() === "status") {
+          return val === "false" ? "active" : "archived";
+        }
         return csvEscape(val == null ? "" : String(val));
       }),
     );
