@@ -390,6 +390,7 @@ export function UserList() {
         emptyDescription="No users have signed in to the app yet"
         emptyIcon={Users}
         defaultPageSize={25}
+        exportFilename="PNAA_users"
       />
 
       {editing && (
