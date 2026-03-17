@@ -538,19 +538,19 @@ export function AdvancedDataTable<T extends object>({
   const buildExportData = useCallback(() => {
     const exportColumns = table
       .getAllColumns()
-      .filter((col) => col.id !== "select" && col.getIsVisible());
+      .filter((col) => {
+        const h = col.columnDef.header ?? col.id;
+        return col.id !== "select" && col.getIsVisible() && typeof h === "string" && h !== "";
+      });
 
-    const headers = exportColumns.map((col) => {
-      const headerProto = col.columnDef.header ?? col.id;
-      return typeof headerProto === "string" ? headerProto : col.id;
-    });
+    const headers = exportColumns.map((col) =>
+      (col.columnDef.header ?? col.id) as string,
+    );
 
     const rows = table.getSelectedRowModel().rows.map((row) =>
       exportColumns.map((col) => {
         const val = row.getValue(col.id);
-        const headerProto = col.columnDef.header ?? col.id;
-        const headerText =
-          typeof headerProto === "string" ? headerProto : col.id;
+        const headerText = (col.columnDef.header ?? col.id) as string;
         if (headerText.toLowerCase() === "status") {
           if (String(val) === "false") return "active";
           else if (String(val) === "true") return "archived";
@@ -621,7 +621,7 @@ export function AdvancedDataTable<T extends object>({
         showRowStripes: true,
       },
       columns: headers.map((h) => ({ name: h, filterButton: true })),
-      rows: rows,
+      rows: rows as ExcelJS.CellValue[][],
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
