@@ -267,7 +267,23 @@ export const syncMembers = onSchedule(
       }
     }
 
+    // Fetch existing chapters to zero out any that lost all members
+    const existingChaptersSnapshot = await db.collection("chapters").get();
+
     const chapterBatch = db.batch();
+
+    for (const chapterDoc of existingChaptersSnapshot.docs) {
+      const chapterData = chapterDoc.data();
+      if (chapterData.name && !chapterCounts[chapterData.name]) {
+        chapterBatch.update(chapterDoc.ref, {
+          totalMembers: 0,
+          totalActive: 0,
+          totalLapsed: 0,
+          lastUpdated: Timestamp.now(),
+        });
+      }
+    }
+
     for (const [chapterName, counts] of Object.entries(chapterCounts)) {
       const slug = chapterName
         .toLowerCase()

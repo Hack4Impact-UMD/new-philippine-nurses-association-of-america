@@ -62,6 +62,14 @@ service cloud.firestore {
       allow delete: if false; // Soft delete only
     }
 
+    // Chapter aliases: readable by all auth users, create/delete by national/region admins
+    match /chapter_aliases/{aliasId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isNationalAdmin() || isRegionAdmin());
+      allow delete: if isAuthenticated() && (isNationalAdmin() || isRegionAdmin());
+      allow update: if false;
+    }
+
     // Users: read own profile or admin reads all
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isNationalAdmin());
