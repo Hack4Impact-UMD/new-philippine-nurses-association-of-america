@@ -87,7 +87,7 @@ export function ChapterList() {
               totalLapsed: acc.totalLapsed + ac.totalLapsed,
             };
           },
-          { totalMembers: 0, totalActive: 0, totalLapsed: 0 },
+          { totalMembers: 0, totalActive: 0, totalLapsed: 0 }
         );
         return {
           ...chapter,

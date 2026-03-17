@@ -534,7 +534,7 @@ export function AdvancedDataTable<T extends object>({
     }
   }, []);
 
-  // Returns headers and rows for export, mapping status "false" → "active" and "true" → "archived"
+  // Returns headers and rows for export and mapping status "false" to "active" and "true" to "archived"
   const buildExportData = useCallback(() => {
     const exportColumns = table
       .getAllColumns()
@@ -571,6 +571,7 @@ export function AdvancedDataTable<T extends object>({
       return needsQuotes ? `"${escaped}"` : escaped;
     };
 
+    //gets the currently visible columns and rows. Format for export
     const { exportColumns, headers, rows } = buildExportData();
 
     if (exportColumns.length === 0) {
@@ -596,6 +597,8 @@ export function AdvancedDataTable<T extends object>({
     setTimeout(() => URL.revokeObjectURL(url), 100);
   }, [buildExportData, exportFilename]);
 
+
+  //export to an xlsx format (for excel)
   const exportToXLSX = useCallback(async () => {
     const { exportColumns, headers, rows } = buildExportData();
 
@@ -604,6 +607,7 @@ export function AdvancedDataTable<T extends object>({
       return;
     }
 
+    //ExcelJS mimics using excel: creating workbook, worksheet, and table
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet(exportFilename);
     worksheet.addTable({
@@ -612,6 +616,7 @@ export function AdvancedDataTable<T extends object>({
       headerRow: true,
       totalsRow: false,
       style: {
+        //styling matches the current app theme closely.
         theme: "TableStyleLight9",
         showRowStripes: true,
       },
