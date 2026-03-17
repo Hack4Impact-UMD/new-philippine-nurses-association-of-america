@@ -8,7 +8,11 @@ import { SearchInput } from "@/components/shared/search-input";
 import { CampaignCard } from "./campaign-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ViewToggle, type ViewMode } from "@/components/shared/view-toggle";
-import { AdvancedDataTable, type ColumnDef, type ColumnMeta } from "@/components/shared/advanced-data-table";
+import {
+  AdvancedDataTable,
+  type ColumnDef,
+  type ColumnMeta,
+} from "@/components/shared/advanced-data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DollarSign } from "lucide-react";
@@ -194,6 +198,7 @@ export function CampaignList() {
           emptyDescription="No fundraising campaigns yet"
           emptyIcon={DollarSign}
           defaultPageSize={15}
+          exportFilename="PNAA_fundraising_campaigns"
         />
       ) : loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

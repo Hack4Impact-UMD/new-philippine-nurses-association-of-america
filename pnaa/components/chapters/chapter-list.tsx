@@ -211,7 +211,7 @@ export function ChapterList() {
       (c) =>
         c.name.toLowerCase().includes(q) || c.region.toLowerCase().includes(q)
     );
-  }, [visibleChapters, debouncedSearch]);
+  }, [mergedChapters,debouncedSearch]);
 
   const handleViewChange = (v: ViewMode) => {
     setView(v);
@@ -254,6 +254,7 @@ export function ChapterList() {
           defaultColumnFilters={[
             { id: "totalActive", value: { op: ">", value: 0 } },
           ]}
+          exportFilename="PNAA_chapters"
         />
       ) : loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
