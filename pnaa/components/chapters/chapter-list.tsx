@@ -260,9 +260,7 @@ export function ChapterList() {
           emptyDescription="No chapters are available"
           emptyIcon={Building2}
           defaultPageSize={20}
-          defaultColumnFilters={[
-            { id: "totalActive", value: { op: ">", value: 0 } },
-          ]}
+          defaultColumnFilters={[{ id: "totalActive", value: { op: ">", value: 0 } }]}
           exportFilename="PNAA_chapters"
         />
       ) : loading ? (
