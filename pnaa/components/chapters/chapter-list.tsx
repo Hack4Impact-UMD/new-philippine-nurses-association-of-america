@@ -179,7 +179,7 @@ export function ChapterList() {
           emptyIcon={Building2}
           defaultPageSize={20}
           defaultColumnFilters={[{ id: "totalActive", value: { op: ">", value: 0 } }]}
-          exportFilename="PNAA-chapters"
+          exportFilename="PNAA_chapters"
         />
       ) : loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

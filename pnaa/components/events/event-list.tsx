@@ -274,7 +274,7 @@ export function EventList() {
           emptyDescription="No events match the current filter"
           emptyIcon={Calendar}
           defaultPageSize={15}
-          exportFilename="PNAA-events"
+          exportFilename="PNAA_events"
         />
       ) : loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

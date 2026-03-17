@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
+import ExcelJS from "exceljs";
 import {
   useReactTable,
   getCoreRowModel,
@@ -146,6 +147,7 @@ interface AdvancedDataTableProps<T> {
   onSelectionChange?: (rows: T[]) => void;
   defaultColumnFilters?: ColumnFiltersState;
   exportFilename?: string;
+  getRowId?: (row: T) => string;
 }
 
 // Using `any` for the header generic to avoid JSX generic syntax issues in .tsx
@@ -384,6 +386,7 @@ export function AdvancedDataTable<T extends object>({
   loading,
   onRowClick,
   emptyTitle = "No data found",
+  getRowId,
   emptyDescription,
   emptyIcon,
   defaultPageSize = 15,
@@ -441,16 +444,14 @@ export function AdvancedDataTable<T extends object>({
   }
 
   const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-    const dataColumnIds = columns
+    return columns
       .map((col) => {
         if ("accessorKey" in col) return col.accessorKey as string;
         if ("id" in col && col.id) return col.id;
         return "";
       })
       .filter(Boolean);
-    return enableSelection ? ["select", ...dataColumnIds] : dataColumnIds;
   });
-
   // Automatically inject numericFilterFn for columns with filterType: "numeric"
   const processedColumns = useMemo(
     () =>
@@ -480,7 +481,21 @@ export function AdvancedDataTable<T extends object>({
     enableColumnResizing: true,
     enableRowSelection: enableSelection ?? true,
     onRowSelectionChange: setRowSelection,
-    getRowId: (row) => (row as { id?: string }).id ?? row.toString(),
+    getRowId: (row) => {
+      if (getRowId) return getRowId(row);
+      const id = (row as { id?: string | number }).id;
+      if (id !== undefined && id !== null) return String(id);
+      // fallback if no id is available; avoid [object Object]
+      if (typeof row === "object" && row !== null) {
+        try {
+          return JSON.stringify(row);
+        } catch {
+          // as last resort
+          return String(row);
+        }
+      }
+      return String(row);
+    },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
@@ -519,40 +534,59 @@ export function AdvancedDataTable<T extends object>({
     }
   }, []);
 
-  const exportToCSV = useCallback(() => {
-    //format value for CSV, escaping quotes and wrapping in quotes if contains comma/newline
-    const csvEscape = (value: string): string => {
-      const escaped = value.replace(/"/g, '""');
-      return /[",\n\r]/.test(value) ? `"${escaped}"` : escaped;
-    };
-
-    //filters only the visible columns and excludes the selection column
+  // Returns headers and rows for export, mapping status "false" → "active" and "true" → "archived"
+  const buildExportData = useCallback(() => {
     const exportColumns = table
       .getAllColumns()
       .filter((col) => col.id !== "select" && col.getIsVisible());
 
-    // take each column's header and render it to string, then escape for CSV
     const headers = exportColumns.map((col) => {
       const headerProto = col.columnDef.header ?? col.id;
-      const headerText = typeof headerProto === "string" ? headerProto : col.id;
-      return csvEscape(headerText);
+      return typeof headerProto === "string" ? headerProto : col.id;
     });
-    // row accounts for null values by replacing with empty string
-    // special case: status columns map false → "active" and true → "archived"
+
     const rows = table.getSelectedRowModel().rows.map((row) =>
       exportColumns.map((col) => {
         const val = row.getValue(col.id);
-        const header = col.columnDef.header ?? col.id;
-        const headerText = typeof header === "string" ? header : col.id;
+        const headerProto = col.columnDef.header ?? col.id;
+        const headerText =
+          typeof headerProto === "string" ? headerProto : col.id;
         if (headerText.toLowerCase() === "status") {
-          return val === "false" ? "active" : "archived";
+          if (String(val) === "false") return "active";
+          else if (String(val) === "true") return "archived";
+          else return "";
         }
-        return csvEscape(val == null ? "" : String(val));
+        return val == null ? "" : val;
       }),
     );
 
+    return { exportColumns, headers, rows };
+  }, [table]);
+
+  const exportToCSV = useCallback(() => {
+    //format value for CSV, escaping quotes and wrapping in quotes if contains comma/newline
+    const csvEscape = (value: string): string => {
+      const escaped = value.replace(/"/g, '""');
+      const needsQuotes = /^[,"\n=+\-@\t\r]/.test(value);
+      return needsQuotes ? `"${escaped}"` : escaped;
+    };
+
+    const { exportColumns, headers, rows } = buildExportData();
+
+    if (exportColumns.length === 0) {
+      console.warn("No visible columns to export to CSV");
+      return;
+    }
+
+    const escapedHeaders = headers.map(csvEscape);
+    const escapedRows = rows.map((row) =>
+      row.map((val) => csvEscape(String(val))),
+    );
+
     //create csv file and trigger download
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const csv = [escapedHeaders, ...escapedRows]
+      .map((r) => r.join(","))
+      .join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -560,7 +594,42 @@ export function AdvancedDataTable<T extends object>({
     a.download = `${exportFilename}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 100);
-  }, [table, exportFilename]);
+  }, [buildExportData, exportFilename]);
+
+  const exportToXLSX = useCallback(async () => {
+    const { exportColumns, headers, rows } = buildExportData();
+
+    if (exportColumns.length === 0) {
+      console.warn("No visible columns to export to XLSX");
+      return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(exportFilename);
+    worksheet.addTable({
+      name: `${exportFilename}Table`,
+      ref: "A1",
+      headerRow: true,
+      totalsRow: false,
+      style: {
+        theme: "TableStyleLight9",
+        showRowStripes: true,
+      },
+      columns: headers.map((h) => ({ name: h, filterButton: true })),
+      rows: rows,
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${exportFilename}.xlsx`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }, [buildExportData, exportFilename]);
 
   const activeFilters = columnFilters.filter((f) => {
     if (f.value === undefined || f.value === null) return false;
@@ -576,6 +645,9 @@ export function AdvancedDataTable<T extends object>({
   const filteredCount = table.getFilteredRowModel().rows.length;
   const totalCount = data.length;
   const selectedCount = Object.values(rowSelection).filter(Boolean).length;
+  const visibleExportColumnCount = table
+    .getAllColumns()
+    .filter((col) => col.id !== "select" && col.getIsVisible()).length;
 
   if (loading) {
     return (
@@ -679,7 +751,10 @@ export function AdvancedDataTable<T extends object>({
                   variant="default"
                   size="sm"
                   className="gap-1.5 h-8 text-xs"
-                  disabled={selectedCount === 0}
+                  disabled={
+                    selectedCount === 0 || visibleExportColumnCount === 0
+                  }
+                  aria-label="Export selected rows"
                 >
                   <Download className="h-3.5 w-3.5" />
                 </Button>
@@ -691,13 +766,20 @@ export function AdvancedDataTable<T extends object>({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full justify-start text-xs gap-1.5"
-                  onClick={() => {
-                    exportToCSV();
-                  }}
+                  className="w-full justify-start text-xs gap-1.5 mt-1"
+                  onClick={() => exportToXLSX()}
                 >
                   <Download className="h-3.5 w-3.5" />
-                  Export to CSV file
+                  Excel file
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start text-xs gap-1.5 mt-1"
+                  onClick={() => exportToCSV()}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  CSV file
                 </Button>
               </PopoverContent>
             </Popover>

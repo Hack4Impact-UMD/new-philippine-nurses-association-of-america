@@ -202,7 +202,7 @@ export function CampaignList() {
           emptyDescription="No fundraising campaigns yet"
           emptyIcon={DollarSign}
           defaultPageSize={15}
-          exportFilename="PNAA-fundraising-campaigns"
+          exportFilename="PNAA_fundraising_campaigns"
         />
       ) : loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
