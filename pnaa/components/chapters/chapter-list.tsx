@@ -44,7 +44,7 @@ export function ChapterList() {
   ]);
 
   // Load all aliases to know which chapter names to hide from the list
-  const { data: allAliases } = useCollection<ChapterAlias>("chapter_aliases",[]);
+  const { data: allAliases } = useCollection<ChapterAlias>("chapter_aliases", []);
 
   const aliasedNames = useMemo(
     () => new Set((allAliases as (ChapterAlias & { id: string })[]).map((a) => a.aliasName)),
@@ -218,8 +218,7 @@ export function ChapterList() {
     localStorage.setItem(STORAGE_KEY, v);
   };
 
-  const hiddenCount =
-    (chapters as ChapterRow[]).length - visibleChapters.length;
+  const hiddenCount = (chapters as ChapterRow[]).length - visibleChapters.length;
 
   return (
     <div className="space-y-4">
