@@ -3,53 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncMembers = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
-const params_1 = require("firebase-functions/params");
-const WA_API_KEY = (0, params_1.defineString)("WILD_APRICOT_API_KEY");
-const WA_ACCOUNT_ID = (0, params_1.defineString)("WILD_APRICOT_ACCOUNT_ID");
-async function getWAToken() {
-    const credentials = Buffer.from(`APIKEY:${WA_API_KEY.value()}`).toString("base64");
-    const response = await fetch("https://oauth.wildapricot.org/auth/token", {
-        method: "POST",
-        headers: {
-            Authorization: `Basic ${credentials}`,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: "grant_type=client_credentials&scope=auto",
-    });
-    if (!response.ok)
-        throw new Error(`WA auth failed: ${response.statusText}`);
-    const data = await response.json();
-    return data.access_token;
-}
-function extractFieldValue(fieldValues, fieldName) {
-    const field = fieldValues.find((f) => f.FieldName === fieldName);
-    if (!field || field.Value === null || field.Value === undefined)
-        return "";
-    if (typeof field.Value === "object" &&
-        field.Value !== null &&
-        "Label" in field.Value) {
-        return field.Value.Label;
-    }
-    return String(field.Value);
-}
-function extractChapterName(fieldValues) {
-    const chapterFields = fieldValues.filter((f) => f.FieldName.includes("Chapter"));
-    for (const field of chapterFields) {
-        if (field.Value === null || field.Value === undefined)
-            continue;
-        let value;
-        if (typeof field.Value === "object" &&
-            "Label" in field.Value) {
-            value = field.Value.Label;
-        }
-        else {
-            value = String(field.Value);
-        }
-        if (value)
-            return value;
-    }
-    return "";
-}
+const wa_utils_1 = require("./wa-utils");
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
@@ -116,39 +70,19 @@ async function fetchAllWAContacts(accessToken, accountId) {
     }
     return allContacts;
 }
-exports.syncMembers = (0, scheduler_1.onSchedule)({ schedule: "every 1 minutes", timeoutSeconds: 540 }, async () => {
+// Run daily at 3 AM ET as a full safety-net sync.
+// Real-time updates are handled by the wildApricotWebhook function.
+exports.syncMembers = (0, scheduler_1.onSchedule)({ schedule: "every day 03:00", timeZone: "America/New_York", timeoutSeconds: 540 }, async () => {
     const db = (0, firestore_1.getFirestore)();
-    const accessToken = await getWAToken();
-    const accountId = WA_ACCOUNT_ID.value();
+    const accessToken = await (0, wa_utils_1.getWAToken)();
+    const accountId = (0, wa_utils_1.getWAAccountId)();
     const now = new Date();
     const rawContacts = await fetchAllWAContacts(accessToken, accountId);
     const allMembers = [];
     for (const contact of rawContacts) {
-        const fieldValues = contact.FieldValues || [];
-        // Skip archived contacts
-        const isArchived = fieldValues.find((f) => f.FieldName === "Archived")?.Value === true;
-        if (isArchived)
-            continue;
-        const renewalDueDate = extractFieldValue(fieldValues, "Renewal due");
-        const activeStatus = renewalDueDate && new Date(renewalDueDate) >= now ? "Active" : "Lapsed";
-        const memberId = extractFieldValue(fieldValues, "Member ID") || String(contact.Id);
-        const membershipLevel = contact.MembershipLevel &&
-            typeof contact.MembershipLevel === "object" &&
-            "Name" in contact.MembershipLevel
-            ? String(contact.MembershipLevel.Name)
-            : "";
-        allMembers.push({
-            name: `${contact.FirstName || ""} ${contact.LastName || ""}`.trim(),
-            email: String(contact.Email || ""),
-            membershipLevel,
-            renewalDueDate,
-            chapterName: extractChapterName(fieldValues),
-            highestEducation: extractFieldValue(fieldValues, "Highest Level of Education"),
-            memberId,
-            region: extractFieldValue(fieldValues, "PNAA Region"),
-            activeStatus,
-            lastSynced: firestore_1.Timestamp.now(),
-        });
+        const member = (0, wa_utils_1.mapContactToMember)(contact);
+        if (member)
+            allMembers.push(member);
     }
     // Write all members to Firestore in batches of 450
     let batch = db.batch();
@@ -168,7 +102,7 @@ exports.syncMembers = (0, scheduler_1.onSchedule)({ schedule: "every 1 minutes",
     if (batchCount > 0) {
         await batch.commit();
     }
-    // Aggregate chapters inline so chapter data updates every sync cycle
+    // Aggregate chapters from the in-memory member list (most efficient for a full sync)
     const chapterCounts = {};
     for (const member of allMembers) {
         if (!member.chapterName)
@@ -190,13 +124,22 @@ exports.syncMembers = (0, scheduler_1.onSchedule)({ schedule: "every 1 minutes",
             chapterCounts[member.chapterName].totalLapsed++;
         }
     }
+    // Fetch existing chapters to zero out any that lost all members
+    const existingChaptersSnapshot = await db.collection("chapters").get();
     const chapterBatch = db.batch();
+    for (const chapterDoc of existingChaptersSnapshot.docs) {
+        const chapterData = chapterDoc.data();
+        if (chapterData.name && !chapterCounts[chapterData.name]) {
+            chapterBatch.update(chapterDoc.ref, {
+                totalMembers: 0,
+                totalActive: 0,
+                totalLapsed: 0,
+                lastUpdated: firestore_1.Timestamp.now(),
+            });
+        }
+    }
     for (const [chapterName, counts] of Object.entries(chapterCounts)) {
-        const slug = chapterName
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/(^-|-$)/g, "");
-        const chapterRef = db.collection("chapters").doc(slug);
+        const chapterRef = db.collection("chapters").doc((0, wa_utils_1.chapterSlug)(chapterName));
         chapterBatch.set(chapterRef, {
             name: chapterName,
             region: counts.region,

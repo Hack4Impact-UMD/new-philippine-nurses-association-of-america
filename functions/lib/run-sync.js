@@ -286,7 +286,20 @@ async function runSyncMembers(startFrom, limit) {
             chapterCounts[member.chapterName].totalLapsed++;
         }
     }
+    // Zero out any existing chapters that no longer have members
+    const existingChaptersSnapshot = await db.collection("chapters").get();
     const chapterBatch = db.batch();
+    for (const chapterDoc of existingChaptersSnapshot.docs) {
+        const chapterData = chapterDoc.data();
+        if (chapterData.name && !chapterCounts[chapterData.name]) {
+            chapterBatch.update(chapterDoc.ref, {
+                totalMembers: 0,
+                totalActive: 0,
+                totalLapsed: 0,
+                lastUpdated: firestore_1.Timestamp.now(),
+            });
+        }
+    }
     for (const [chapterName, counts] of Object.entries(chapterCounts)) {
         const slug = chapterName
             .toLowerCase()

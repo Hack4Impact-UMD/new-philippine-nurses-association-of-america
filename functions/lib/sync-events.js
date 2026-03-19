@@ -3,28 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncEvents = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
-const params_1 = require("firebase-functions/params");
-const WA_API_KEY = (0, params_1.defineString)("WILD_APRICOT_API_KEY");
-const WA_ACCOUNT_ID = (0, params_1.defineString)("WILD_APRICOT_ACCOUNT_ID");
-async function getWAToken() {
-    const credentials = Buffer.from(`APIKEY:${WA_API_KEY.value()}`).toString("base64");
-    const response = await fetch("https://oauth.wildapricot.org/auth/token", {
-        method: "POST",
-        headers: {
-            Authorization: `Basic ${credentials}`,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: "grant_type=client_credentials&scope=auto",
-    });
-    if (!response.ok)
-        throw new Error(`WA auth failed: ${response.statusText}`);
-    const data = await response.json();
-    return data.access_token;
-}
-exports.syncEvents = (0, scheduler_1.onSchedule)({ schedule: "every 1 minutes", timeoutSeconds: 300 }, async () => {
+const wa_utils_1 = require("./wa-utils");
+// Run daily at 4 AM ET as a safety-net for any events missed by the webhook.
+// Real-time event inserts, updates, and soft-deletes are handled by the
+// wildApricotWebhook function.
+exports.syncEvents = (0, scheduler_1.onSchedule)({ schedule: "every day 04:00", timeZone: "America/New_York", timeoutSeconds: 300 }, async () => {
     const db = (0, firestore_1.getFirestore)();
-    const accessToken = await getWAToken();
-    const accountId = WA_ACCOUNT_ID.value();
+    const accessToken = await (0, wa_utils_1.getWAToken)();
+    const accountId = (0, wa_utils_1.getWAAccountId)();
     // Paginate through all WA events (stop when page < PAGE_SIZE = last page)
     const PAGE_SIZE = 100;
     let skip = 0;

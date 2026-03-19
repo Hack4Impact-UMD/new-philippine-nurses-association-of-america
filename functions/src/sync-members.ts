@@ -1,66 +1,12 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
-import { defineString } from "firebase-functions/params";
-
-const WA_API_KEY = defineString("WILD_APRICOT_API_KEY");
-const WA_ACCOUNT_ID = defineString("WILD_APRICOT_ACCOUNT_ID");
-
-async function getWAToken(): Promise<string> {
-  const credentials = Buffer.from(
-    `APIKEY:${WA_API_KEY.value()}`
-  ).toString("base64");
-
-  const response = await fetch("https://oauth.wildapricot.org/auth/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials&scope=auto",
-  });
-
-  if (!response.ok) throw new Error(`WA auth failed: ${response.statusText}`);
-  const data = await response.json();
-  return data.access_token;
-}
-
-function extractFieldValue(
-  fieldValues: Array<{ FieldName: string; Value: unknown }>,
-  fieldName: string
-): string {
-  const field = fieldValues.find((f) => f.FieldName === fieldName);
-  if (!field || field.Value === null || field.Value === undefined) return "";
-  if (
-    typeof field.Value === "object" &&
-    field.Value !== null &&
-    "Label" in (field.Value as Record<string, unknown>)
-  ) {
-    return (field.Value as { Label: string }).Label;
-  }
-  return String(field.Value);
-}
-
-function extractChapterName(
-  fieldValues: Array<{ FieldName: string; Value: unknown }>
-): string {
-  const chapterFields = fieldValues.filter((f) =>
-    f.FieldName.includes("Chapter")
-  );
-  for (const field of chapterFields) {
-    if (field.Value === null || field.Value === undefined) continue;
-    let value: string;
-    if (
-      typeof field.Value === "object" &&
-      "Label" in (field.Value as Record<string, unknown>)
-    ) {
-      value = (field.Value as { Label: string }).Label;
-    } else {
-      value = String(field.Value);
-    }
-    if (value) return value;
-  }
-  return "";
-}
+import {
+  getWAToken,
+  getWAAccountId,
+  mapContactToMember,
+  chapterSlug,
+  MemberData,
+} from "./wa-utils";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -144,71 +90,22 @@ async function fetchAllWAContacts(
   return allContacts;
 }
 
-type MemberData = {
-  name: string;
-  email: string;
-  membershipLevel: string;
-  renewalDueDate: string;
-  chapterName: string;
-  highestEducation: string;
-  memberId: string;
-  region: string;
-  activeStatus: "Active" | "Lapsed";
-  lastSynced: Timestamp;
-};
-
+// Run daily at 3 AM ET as a full safety-net sync.
+// Real-time updates are handled by the wildApricotWebhook function.
 export const syncMembers = onSchedule(
-  { schedule: "every 1 minutes", timeoutSeconds: 540 },
+  { schedule: "every day 03:00", timeZone: "America/New_York", timeoutSeconds: 540 },
   async () => {
     const db = getFirestore();
     const accessToken = await getWAToken();
-    const accountId = WA_ACCOUNT_ID.value();
+    const accountId = getWAAccountId();
     const now = new Date();
 
     const rawContacts = await fetchAllWAContacts(accessToken, accountId);
     const allMembers: MemberData[] = [];
 
     for (const contact of rawContacts) {
-      const fieldValues =
-        (contact.FieldValues as Array<{
-          FieldName: string;
-          Value: unknown;
-        }>) || [];
-
-      // Skip archived contacts
-      const isArchived = fieldValues.find((f) => f.FieldName === "Archived")?.Value === true;
-      if (isArchived) continue;
-
-      const renewalDueDate = extractFieldValue(fieldValues, "Renewal due");
-
-      const activeStatus: "Active" | "Lapsed" =
-        renewalDueDate && new Date(renewalDueDate) >= now ? "Active" : "Lapsed";
-
-      const memberId =
-        extractFieldValue(fieldValues, "Member ID") || String(contact.Id);
-
-      const membershipLevel =
-        contact.MembershipLevel &&
-        typeof contact.MembershipLevel === "object" &&
-        "Name" in (contact.MembershipLevel as Record<string, unknown>)
-          ? String((contact.MembershipLevel as { Name: unknown }).Name)
-          : "";
-
-      allMembers.push({
-        name: `${contact.FirstName || ""} ${contact.LastName || ""}`.trim(),
-        email: String(contact.Email || ""),
-        membershipLevel,
-        renewalDueDate,
-        chapterName: extractChapterName(fieldValues),
-        highestEducation: extractFieldValue(
-          fieldValues,
-          "Highest Level of Education"
-        ),
-        memberId,
-        region: extractFieldValue(fieldValues, "PNAA Region"),
-        activeStatus,
-        lastSynced: Timestamp.now(),
-      });
+      const member = mapContactToMember(contact);
+      if (member) allMembers.push(member);
     }
 
     // Write all members to Firestore in batches of 450
@@ -233,7 +130,7 @@ export const syncMembers = onSchedule(
       await batch.commit();
     }
 
-    // Aggregate chapters inline so chapter data updates every sync cycle
+    // Aggregate chapters from the in-memory member list (most efficient for a full sync)
     const chapterCounts: Record<
       string,
       {
@@ -285,12 +182,7 @@ export const syncMembers = onSchedule(
     }
 
     for (const [chapterName, counts] of Object.entries(chapterCounts)) {
-      const slug = chapterName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/(^-|-$)/g, "");
-
-      const chapterRef = db.collection("chapters").doc(slug);
+      const chapterRef = db.collection("chapters").doc(chapterSlug(chapterName));
       chapterBatch.set(
         chapterRef,
         {

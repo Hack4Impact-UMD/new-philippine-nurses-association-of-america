@@ -51,8 +51,20 @@ exports.updateMembers = (0, scheduler_1.onSchedule)({ schedule: "every day 02:00
             chapterCounts[chapterName].totalLapsed++;
         }
     }
-    // 3. Batch upsert chapter documents
+    // 3. Batch upsert chapter documents, zeroing out any that lost all members
+    const existingChaptersSnapshot = await db.collection("chapters").get();
     const chapterBatch = db.batch();
+    for (const chapterDoc of existingChaptersSnapshot.docs) {
+        const chapterData = chapterDoc.data();
+        if (chapterData.name && !chapterCounts[chapterData.name]) {
+            chapterBatch.update(chapterDoc.ref, {
+                totalMembers: 0,
+                totalActive: 0,
+                totalLapsed: 0,
+                lastUpdated: firestore_1.Timestamp.now(),
+            });
+        }
+    }
     for (const [chapterName, counts] of Object.entries(chapterCounts)) {
         const slug = chapterName
             .toLowerCase()
