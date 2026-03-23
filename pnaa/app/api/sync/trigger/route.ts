@@ -12,8 +12,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify the token and check for national_admin role
-    const decoded = await adminAuth.verifyIdToken(token).catch(() => null);
+    // Verify the session cookie
+    const decoded = await adminAuth.verifySessionCookie(token).catch(() => null);
     if (!decoded) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
