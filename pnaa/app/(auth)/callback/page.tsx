@@ -18,7 +18,21 @@ export default function CallbackPage() {
     }
 
     signInWithCustomToken(auth, token)
-      .then(() => {
+      .then(async (userCredential) => {
+        // Get a verified ID token from the signed-in user
+        const idToken = await userCredential.user.getIdToken();
+
+        // Exchange it for a server-side session cookie
+        const res = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        });
+
+        if (!res.ok) {
+          throw new Error("Failed to create session");
+        }
+
         router.push("/dashboard");
       })
       .catch((err) => {

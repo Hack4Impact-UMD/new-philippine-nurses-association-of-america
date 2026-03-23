@@ -15,13 +15,8 @@ async function getCallerUid(): Promise<string | null> {
   const token = cookieStore.get("firebase_token")?.value;
   if (!token) return null;
   try {
-    // Firebase custom tokens are JWTs with the user's uid in the payload
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf-8")
-    );
-    return payload.uid || null;
+    const decoded = await adminAuth.verifySessionCookie(token);
+    return decoded.uid;
   } catch {
     return null;
   }

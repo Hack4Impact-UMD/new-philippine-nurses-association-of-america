@@ -73,19 +73,12 @@ export async function GET(request: NextRequest) {
         { merge: true }
       );
 
-    // Create Firebase custom token with claims
+    // Create Firebase custom token with claims.
+    // The client will sign in with this token, obtain an ID token, and then
+    // POST it to /api/auth/session to create a verified session cookie.
     const customToken = await adminAuth.createCustomToken(uid, {
       role,
       chapterName: chapterName || null,
-    });
-
-    // Set session cookie with the custom token
-    cookieStore.set("firebase_token", customToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60, // 1 hour
-      path: "/",
     });
 
     // Redirect to callback page which will sign in client-side

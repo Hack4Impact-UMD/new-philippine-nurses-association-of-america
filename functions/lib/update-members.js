@@ -6,9 +6,11 @@ const firestore_1 = require("firebase-admin/firestore");
 exports.updateMembers = (0, scheduler_1.onSchedule)({ schedule: "every day 02:00", timeZone: "America/New_York" }, async () => {
     const db = (0, firestore_1.getFirestore)();
     const now = new Date();
-    // 1. Recalculate activeStatus for all members
+    // 1. Recalculate activeStatus for all members (batched at 450 to stay
+    //    within Firestore's 500-operation-per-batch limit)
     const membersSnapshot = await db.collection("members").get();
-    const batch = db.batch();
+    let batch = db.batch();
+    let batchCount = 0;
     let statusChanges = 0;
     for (const doc of membersSnapshot.docs) {
         const member = doc.data();
@@ -20,10 +22,18 @@ exports.updateMembers = (0, scheduler_1.onSchedule)({ schedule: "every day 02:00
         }
         if (member.activeStatus !== newStatus) {
             batch.update(doc.ref, { activeStatus: newStatus });
+            batchCount++;
             statusChanges++;
+            if (batchCount === 450) {
+                await batch.commit();
+                batch = db.batch();
+                batchCount = 0;
+            }
         }
     }
-    await batch.commit();
+    if (batchCount > 0) {
+        await batch.commit();
+    }
     console.log(`updateMembers: ${statusChanges} status changes`);
     // 2. Aggregate chapter counts
     const chapterCounts = {};
