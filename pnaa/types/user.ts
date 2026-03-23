@@ -8,6 +8,7 @@ export interface AppUser {
   role: UserRole;
   chapterName?: string;
   region?: string;
+  needsOnboarding?: boolean;
   createdAt: Timestamp;
   lastLogin: Timestamp;
   waContactId?: string;

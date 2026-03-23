@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { exchangeCodeForToken, getContactInfo, extractFieldValue } from "@/lib/wild-apricot/oauth";
+import { exchangeCodeForToken, getContactInfo } from "@/lib/wild-apricot/oauth";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 
 export async function GET(request: NextRequest) {
@@ -31,10 +31,6 @@ export async function GET(request: NextRequest) {
 
     const email = contact.Email;
     const displayName = `${contact.FirstName} ${contact.LastName}`.trim();
-    const chapterName = "National";
-    const region = "National";
-    const memberId = "1111";
-
 
     // Find or create Firebase Auth user
     let firebaseUser;
@@ -48,37 +44,45 @@ export async function GET(request: NextRequest) {
     }
 
     const uid = firebaseUser.uid;
-
-    // Determine role (default to member, can be upgraded by admin)
     const userDoc = await adminDb.collection("users").doc(uid).get();
+    const isNewUser = !userDoc.exists;
     let role = "member";
-    if (userDoc.exists) {
-      role = userDoc.data()?.role || "member";
-    }
 
-    // Update/create user document in Firestore
-    await adminDb
-      .collection("users")
-      .doc(uid)
-      .set(
-        {
-          email,
-          displayName,
-          chapterName: chapterName || null,
-          region: region || null,
-          waContactId: String(contact.Id),
-          lastLogin: new Date(),
-          ...(userDoc.exists ? {} : { role, createdAt: new Date() }),
-        },
-        { merge: true }
-      );
+    if (isNewUser) {
+      // First sign-in: create doc without chapter/region — user picks during onboarding
+      await adminDb.collection("users").doc(uid).set({
+        email,
+        displayName,
+        role,
+        waContactId: String(contact.Id),
+        needsOnboarding: true,
+        createdAt: new Date(),
+        lastLogin: new Date(),
+      });
+    } else {
+      // Returning user: update login info only, preserve role/chapter/region
+      role = userDoc.data()?.role || "member";
+      await adminDb
+        .collection("users")
+        .doc(uid)
+        .set(
+          {
+            email,
+            displayName,
+            waContactId: String(contact.Id),
+            lastLogin: new Date(),
+          },
+          { merge: true }
+        );
+    }
 
     // Create Firebase custom token with claims.
     // The client will sign in with this token, obtain an ID token, and then
     // POST it to /api/auth/session to create a verified session cookie.
+    const chapterName = isNewUser ? null : (userDoc.data()?.chapterName || null);
     const customToken = await adminAuth.createCustomToken(uid, {
       role,
-      chapterName: chapterName || null,
+      ...(chapterName ? { chapterName } : {}),
     });
 
     // Redirect to callback page which will sign in client-side

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithCustomToken } from "firebase/auth";
-import { auth } from "@/lib/firebase/config";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase/config";
 
 export default function CallbackPage() {
   const router = useRouter();
@@ -33,7 +34,15 @@ export default function CallbackPage() {
           throw new Error("Failed to create session");
         }
 
-        router.push("/dashboard");
+        // Check if this is a new user who needs to pick their chapter
+        const userDoc = await getDoc(
+          doc(db, "users", userCredential.user.uid)
+        );
+        if (userDoc.exists() && userDoc.data()?.needsOnboarding) {
+          router.push("/setup");
+        } else {
+          router.push("/dashboard");
+        }
       })
       .catch((err) => {
         console.error("Firebase sign-in error:", err);
