@@ -23,11 +23,14 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 ## Features
 
 - **Dashboard** — Real-time stats (total/active/lapsed members, chapters, upcoming events, total fundraised)
-- **Chapter Management** — Browse all chapters, view chapter-level member breakdowns
-- **Event Management** — Create, edit, and view events with metrics (attendees, volunteers, contact hours, etc.); synced from Wild Apricot
+- **Chapter Management** — Browse all chapters, view chapter-level member breakdowns; chapter aliases merge stats from alternative Wild Apricot names
+- **Event Management** — Create, edit, and view events with metrics (attendees, volunteers, contact hours, etc.); synced from Wild Apricot via scheduled functions and real-time webhooks
 - **Fundraising** — Track fundraising campaigns with amounts, notes, and chapter attribution
-- **Member Sync** — Automated Wild Apricot membership data sync every minute via Cloud Functions
-- **Role-Based Access** — National admins see all data; chapter admins and members see scoped data
+- **Subchapters** — Create subchapters within chapters, assign members, soft-delete support
+- **Member Sync** — Automated Wild Apricot membership sync via scheduled Cloud Functions (daily) and real-time webhooks
+- **First-Time Onboarding** — New users select their region and chapter on first sign-in; this can only be changed later by a national admin via the user management page
+- **Role-Based Access** — National admins see all data; region admins manage their region; chapter admins manage their chapter; members have read-only access
+- **User Management** — National admins can view all users and update roles, regions, and chapter assignments
 - **Advanced Data Tables** — Chapters, Events, and Fundraising pages feature a rich table view with sortable, resizable, and drag-to-reorder columns; per-column filters; column visibility toggles; and pagination. Switchable to a card grid via a pill toggle.
 - **Responsive UI** — Mobile-friendly with sidebar navigation and dark mode support
 
@@ -55,10 +58,10 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 ### Backend & Infrastructure
 | Technology | Purpose |
 |---|---|
-| Firebase Auth | Authentication via custom tokens |
+| Firebase Auth | Authentication via custom tokens + session cookies |
 | Firestore | Primary NoSQL database |
 | Firebase Storage | Event poster image uploads (5MB max, images only) |
-| Firebase Cloud Functions | Scheduled data sync from Wild Apricot |
+| Firebase Cloud Functions | Scheduled data sync + real-time webhooks from Wild Apricot |
 | Wild Apricot | Membership management platform (OAuth 2.0 integration) |
 
 ---
@@ -68,9 +71,9 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Next.js App                          │
-│  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐   │
-│  │ Dashboard│  │  Events  │  │ Fundraising│  │ Chapters │   │
-│  └──────────┘  └──────────┘  └────────────┘  └──────────┘   │
+│  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐  │
+│  │ Dashboard │  │  Events  │  │ Fundraising│  │ Chapters │  │
+│  └──────────┘  └──────────┘  └────────────┘  └──────────┘  │
 │                     │ Real-time listeners                   │
 └─────────────────────┼───────────────────────────────────────┘
                       │
@@ -78,20 +81,23 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
         │         Firestore         │
         │  members / events /       │
         │  fundraising / chapters / │
-        │  users                    │
+        │  subchapters / users /    │
+        │  chapter_aliases          │
         └──────────┬────────────────┘
                    │
-     ┌─────────────┴──────────────┐
-     │   Firebase Cloud Functions  │
-     │  • syncMembers (scheduled)  │
-     │  • syncEvents (scheduled)   │
-     │  • updateMembers            │
-     │  • createUser (callable)    │
-     └──────────┬──────────────────┘
+     ┌─────────────┴──────────────────┐
+     │    Firebase Cloud Functions     │
+     │  • syncMembers (daily 3 AM ET) │
+     │  • syncEvents  (daily 4 AM ET) │
+     │  • updateMembers (daily 2 AM)  │
+     │  • wildApricotWebhook (HTTP)   │
+     │  • createUser (callable)       │
+     └──────────┬─────────────────────┘
                 │ Wild Apricot REST API
      ┌──────────┴──────────────────┐
      │       Wild Apricot          │
      │  (Membership management)    │
+     │  Webhooks → Cloud Functions │
      └─────────────────────────────┘
 ```
 
@@ -99,25 +105,44 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 
 ## Authentication Flow
 
-Authentication uses Wild Apricot OAuth 2.0 to identify users, then issues Firebase custom tokens for session management.
+Authentication uses Wild Apricot OAuth 2.0 to identify users, then issues Firebase session cookies for secure server-side verification.
 
 ```
 1. User visits /signin
 2. GET /api/auth/signin
-   → Generates CSRF state, sets state cookie
+   → Generates CSRF state, sets httpOnly state cookie
    → Redirects to Wild Apricot OAuth login URL
 3. Wild Apricot redirects to GET /api/auth/callback?code=...&state=...
-   → Validates state cookie (CSRF check)
-   → Exchanges code for Wild Apricot access token
+   → Validates state cookie (CSRF protection)
+   → Exchanges authorization code for Wild Apricot access token
    → Fetches user contact info from Wild Apricot API
-   → Creates or updates Firebase Auth user
-   → Creates or updates Firestore /users/{uid} document
-   → Issues Firebase custom token
-   → Sets secure session cookie (firebase_token)
-   → Redirects to /callback with token
-4. Client-side: signs into Firebase with custom token
-5. Middleware checks firebase_token cookie on protected routes
+   → Creates or finds Firebase Auth user by email
+   → Creates Firestore /users/{uid} doc (new users get needsOnboarding: true)
+   → Returning users: only lastLogin is updated (chapter/region preserved)
+   → Issues Firebase custom token with role claims
+   → Redirects to /callback?token=<customToken>
+4. Client-side /callback page:
+   → Signs into Firebase with custom token (signInWithCustomToken)
+   → Obtains ID token from the signed-in user (getIdToken)
+   → POSTs ID token to /api/auth/session
+   → Server creates a verified session cookie (createSessionCookie)
+   → Sets httpOnly cookie "firebase_token" (1 hour)
+   → Redirects to /setup (new users) or /dashboard (returning users)
+5. /setup page (first-time only):
+   → User selects their region, then their chapter
+   → Saves via POST /api/auth/setup → sets needsOnboarding: false
+   → Redirects to /dashboard
+6. Protected routes:
+   → Middleware checks firebase_token cookie existence
+   → API routes verify the cookie via verifySessionCookie (cryptographic check)
+   → OnboardingGuard in app layout redirects to /setup if needsOnboarding
 ```
+
+**Key security properties:**
+- Session cookies are created by `createSessionCookie` and verified by `verifySessionCookie` — cryptographic verification on every API call
+- The `firebase_token` cookie is httpOnly, secure (in production), SameSite=Lax
+- CSRF protection on the OAuth flow via a state cookie
+- User chapter/region can only be changed by national admins via the user management page (after initial onboarding)
 
 ---
 
@@ -131,52 +156,65 @@ philippine-nurses-association-of-america/
 ├── storage.rules              # Firebase Storage rules
 ├── functions/                 # Firebase Cloud Functions
 │   └── src/
-│       ├── index.ts           # Function exports
-│       ├── sync-members.ts    # Scheduled member sync
-│       ├── sync-events.ts     # Scheduled event sync
-│       ├── update-members.ts  # Member data updates
-│       └── create-user.ts     # Callable: admin user creation
+│       ├── index.ts           # Function exports + Admin SDK init
+│       ├── sync-members.ts    # Scheduled daily member sync (3 AM ET)
+│       ├── sync-events.ts     # Scheduled daily event sync (4 AM ET)
+│       ├── update-members.ts  # Scheduled daily status recalculation (2 AM ET)
+│       ├── webhook-handler.ts # Real-time Wild Apricot webhook receiver
+│       ├── create-user.ts     # Callable: admin user creation
+│       ├── wa-utils.ts        # Shared WA utilities (token, mapping, aggregation)
+│       └── run-sync.ts        # Local dev script for manual syncs
 └── pnaa/                      # Next.js application
-    ├── middleware.ts           # Route protection
+    ├── middleware.ts           # Route protection (cookie existence check)
     ├── app/
     │   ├── layout.tsx          # Root layout (AuthProvider)
-    │   ├── page.tsx            # Root redirect
+    │   ├── page.tsx            # Root redirect (→ /dashboard or /signin)
     │   ├── api/
     │   │   ├── auth/
     │   │   │   ├── signin/     # Start OAuth flow
     │   │   │   ├── callback/   # Handle OAuth callback
-    │   │   │   └── signout/    # Sign out
-    │   │   └── sync/trigger/   # Manual sync trigger
+    │   │   │   ├── session/    # Create verified session cookie from ID token
+    │   │   │   ├── setup/      # Save first-time chapter/region selection
+    │   │   │   └── signout/    # Clear session cookie
+    │   │   ├── sync/trigger/   # Manual sync trigger (national_admin only)
+    │   │   └── users/[userId]/ # Update user role/chapter/region (national_admin only)
     │   ├── (auth)/
     │   │   ├── signin/         # Sign-in page
-    │   │   └── callback/       # OAuth return handler
-    │   └── (app)/              # Protected app routes
+    │   │   ├── callback/       # OAuth return → Firebase sign-in → session cookie
+    │   │   └── setup/          # First-time onboarding: pick region & chapter
+    │   └── (app)/              # Protected app routes (wrapped in OnboardingGuard)
+    │       ├── layout.tsx      # App chrome (sidebar, header) + OnboardingGuard
     │       ├── dashboard/
     │       ├── chapters/[chapterId]/
+    │       │   ├── aliases/
+    │       │   └── subchapters/[subchapterId]/
     │       ├── events/[eventId]/edit/
     │       ├── fundraising/[fundraisingId]/edit/
+    │       ├── users/          # User management (national_admin only)
     │       └── about/
     ├── components/
     │   ├── ui/                 # shadcn/ui primitives
+    │   ├── auth/               # OnboardingGuard
     │   ├── layout/             # Header, Sidebar, MobileNav
     │   ├── dashboard/          # Stats cards, widgets
     │   ├── events/             # Event list, card, form, detail
     │   ├── chapters/           # Chapter list, card, detail
     │   ├── fundraising/        # Campaign list, card, form, detail
-    │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, ViewToggle, etc.
+    │   ├── users/              # User list with edit dialog
+    │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, ViewToggle
     ├── hooks/
-    │   ├── use-auth.ts         # Auth helpers (role checks)
-    │   ├── use-firestore.ts    # useDocument / useCollection
+    │   ├── use-auth.ts         # Auth helpers (role checks, chapter/region getters)
+    │   ├── use-firestore.ts    # useDocument / useCollection (real-time listeners)
     │   ├── use-debounce.ts
     │   ├── use-mobile.ts
     │   └── use-sidebar.ts
     ├── lib/
     │   ├── auth/
     │   │   ├── context.tsx     # AuthProvider & useAuthContext
-    │   │   └── guards.tsx      # Route guard components
+    │   │   └── guards.tsx      # RequireAuth / RequireRole components
     │   ├── firebase/
     │   │   ├── config.ts       # Client SDK init
-    │   │   ├── admin.ts        # Admin SDK (server-side)
+    │   │   ├── admin.ts        # Admin SDK (server-side, lazy Proxy pattern)
     │   │   ├── firestore.ts    # Firestore helpers
     │   │   ├── storage.ts      # Storage helpers
     │   │   └── index.ts
@@ -186,6 +224,8 @@ philippine-nurses-association-of-america/
         ├── user.ts
         ├── member.ts
         ├── chapter.ts
+        ├── chapter-alias.ts
+        ├── subchapter.ts
         ├── event.ts
         └── fundraising.ts
 ```
@@ -220,7 +260,15 @@ WILD_APRICOT_ACCOUNT_ID=
 WILD_APRICOT_DOMAIN=
 ```
 
-Firebase Admin credentials are required for the OAuth callback route (issues custom tokens). Obtain them from a Firebase service account JSON file.
+Firebase Admin credentials are required for the OAuth callback route (issues custom tokens) and the session route (creates/verifies session cookies). Obtain them from a Firebase service account JSON file.
+
+Cloud Functions use separate environment variables configured in `functions/.env`:
+
+```env
+WILD_APRICOT_API_KEY=
+WILD_APRICOT_ACCOUNT_ID=
+WEBHOOK_SECRET=          # For webhook endpoint authentication
+```
 
 ---
 
@@ -303,7 +351,7 @@ When the app is using staging, all Firestore/Auth operations go to the **staging
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20+
 - Firebase CLI (`npm install -g firebase-tools`)
 - A Firebase project with Firestore, Auth, Storage, and Functions enabled
 - A Wild Apricot account with API/OAuth credentials
@@ -333,6 +381,18 @@ npm run build
 npm run serve
 ```
 
+### Manual Sync (Local Dev)
+
+From the `functions/` directory:
+
+```bash
+npm run sync                              # sync members + events
+npm run sync:members                      # members only
+npm run sync:events                       # events only
+npm run sync:members -- --from 5000       # start at contact #5000
+npm run sync:members -- --limit 1000      # first 1000 contacts only
+```
+
 ### Deploy
 
 ```bash
@@ -352,10 +412,30 @@ firebase deploy --only functions
 
 | Function | Trigger | Description |
 |---|---|---|
-| `syncMembers` | Scheduled (every 1 min) | Fetches all contacts from Wild Apricot and upserts to `members` collection. Determines active/lapsed status from renewal due date. |
-| `syncEvents` | Scheduled (every 1 min) | Fetches events from Wild Apricot and inserts into `events` collection. **Insert-only** — existing events are never overwritten. |
-| `updateMembers` | Scheduled (daily, 2 AM EST) | Recalculates active/lapsed status for all members and rebuilds chapter aggregate totals in the `chapters` collection. |
-| `createUser` | Callable (admin only) | Creates a Firebase Auth user and Firestore user document. Restricted to `national_admin` role. |
+| `syncMembers` | Scheduled (daily, 3 AM ET) | Full safety-net sync: fetches all contacts from Wild Apricot via async job polling, upserts to `members` collection in batches of 450, rebuilds chapter aggregates. Timeout: 540s. |
+| `syncEvents` | Scheduled (daily, 4 AM ET) | Safety-net sync: fetches all events from Wild Apricot, **insert-only** — existing events are never overwritten. Timeout: 300s. |
+| `updateMembers` | Scheduled (daily, 2 AM ET) | Recalculates active/lapsed status for all members based on `renewalDueDate`, rebuilds chapter aggregate totals. Writes batched at 450 to stay within Firestore limits. |
+| `wildApricotWebhook` | HTTP (POST) | Real-time webhook receiver for Wild Apricot contact, membership, and event changes. Contact/membership changes upsert the member and recalculate affected chapter aggregates. Event changes: Created = insert-only, Changed = updates WA-owned fields only (preserves app fields), Deleted = soft-delete (`archived: true`). Always returns 200 to prevent WA retry loops. |
+| `createUser` | Callable | Creates a Firebase Auth user and Firestore user document with role/chapter/region. Restricted to `national_admin` callers. |
+
+### Webhook Configuration
+
+Configure in Wild Apricot (Apps > Integrations > Webhooks):
+
+| Setting | Value |
+|---|---|
+| URL | `https://[region]-[project].cloudfunctions.net/wildApricotWebhook?key=[WEBHOOK_SECRET]` |
+| Authorization | Secret token (query param) |
+| Token name | `key` |
+| Token value | Value of `WEBHOOK_SECRET` from `functions/.env` |
+| Notification types | Contact, Membership, Event, MembershipRenewed |
+
+### Data Sync Strategy
+
+- **Real-time**: The webhook handler processes individual contact/event changes as they happen in Wild Apricot
+- **Daily safety-net**: Scheduled functions run overnight to catch anything missed by webhooks
+- **Execution order**: `updateMembers` (2 AM) → `syncMembers` (3 AM) → `syncEvents` (4 AM)
+- **Chapter aggregates**: Always rebuilt from scratch (not incremental), so partial syncs produce accurate counts
 
 ---
 
@@ -363,13 +443,16 @@ firebase deploy --only functions
 
 | Role | Access |
 |---|---|
-| `national_admin` | Full read/write access to all chapters, events, fundraising, members, and users |
+| `national_admin` | Full read/write access to all chapters, events, fundraising, members, users, and chapter aliases |
+| `region_admin` | Read access to all data; can create/edit events and fundraising for chapters in their region; can manage chapter aliases |
 | `chapter_admin` | Read access to all data; can create/edit events and fundraising for their chapter |
-| `member` | Read-only access to events, chapters, and their own user profile |
+| `member` | Read-only access to events, chapters, fundraising, and their own user profile |
 
-Roles are stored as Firebase Auth custom claims and mirrored in Firestore `/users/{uid}`. Firestore security rules enforce these permissions server-side.
+Roles are stored as Firebase Auth custom claims and mirrored in Firestore `/users/{uid}`. Firestore security rules enforce permissions server-side via `getUserRole()` which reads from the Firestore user document.
 
-Soft deletes are used for events and fundraising (no direct deletes allowed via security rules — records are archived with `archived: true`).
+Soft deletes are used for events, fundraising, and subchapters (no hard deletes allowed via security rules — records are archived with `archived: true`).
+
+Members and chapters are **read-only** from the client — only Cloud Functions write to these collections.
 
 ---
 
@@ -384,7 +467,7 @@ Soft deletes are used for events and fundraising (no direct deletes allowed via 
   renewalDueDate: string
   chapterName: string
   highestEducation: string
-  memberId: string
+  memberId: string               // From WA custom field, fallback: WA contact ID
   region: string
   activeStatus: "Active" | "Lapsed"
   lastSynced: Timestamp
@@ -422,6 +505,7 @@ Soft deletes are used for events and fundraising (no direct deletes allowed via 
 {
   fundraiserName: string
   chapterName: string
+  subchapterId?: string
   date: string
   amount: number
   note: string
@@ -444,14 +528,35 @@ Soft deletes are used for events and fundraising (no direct deletes allowed via 
 }
 ```
 
+### Subchapter
+```typescript
+{
+  name: string
+  chapterId: string
+  createdBy: string
+  memberIds: string[]
+  archived: boolean
+  lastUpdated: Timestamp
+}
+```
+
+### Chapter Alias
+```typescript
+{
+  aliasName: string          // Alternative WA chapter name
+  canonicalChapterId: string // Maps to chapters/{chapterId}
+}
+```
+
 ### User
 ```typescript
 {
   email: string
   displayName: string
-  role: "national_admin" | "chapter_admin" | "member"
+  role: "national_admin" | "region_admin" | "chapter_admin" | "member"
   chapterName?: string
   region?: string
+  needsOnboarding?: boolean  // true for new users until they complete /setup
   waContactId?: string
   createdAt: Timestamp
   lastLogin: Timestamp
