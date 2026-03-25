@@ -93,7 +93,7 @@ export default function SetupPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-6">
+      <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold tracking-tight">
             Welcome to PNAA
@@ -111,7 +111,7 @@ export default function SetupPage() {
               onValueChange={handleRegionChange}
               disabled={chaptersLoading}
             >
-              <SelectTrigger id="region">
+              <SelectTrigger id="region" className="w-full">
                 <SelectValue
                   placeholder={
                     chaptersLoading ? "Loading..." : "Select your region..."
@@ -132,7 +132,7 @@ export default function SetupPage() {
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
               <Select value={chapterName} onValueChange={setChapterName}>
-                <SelectTrigger id="chapter">
+                <SelectTrigger id="chapter" className="w-full">
                   <SelectValue placeholder="Select your chapter..." />
                 </SelectTrigger>
                 <SelectContent>
