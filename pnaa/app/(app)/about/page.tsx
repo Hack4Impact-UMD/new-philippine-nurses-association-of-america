@@ -16,11 +16,7 @@ export default function AboutPage() {
         </CardHeader>
         <CardContent className="space-y-4 text-sm text-muted-foreground">
           <p>
-            The Philippine Nurses Association of America (PNAA) is a
-            professional nursing organization that serves as the voice of
-            Filipino-American nurses in the United States. Founded in 1979, PNAA
-            is dedicated to upholding and promoting the professional image and
-            welfare of its members.
+            The Philippine Nurses Association of America (PNAA) is a professional organization representing Filipino-American nurses across the United States. Established in 1979, PNAA is committed to advancing the professional growth, leadership, and well-being of its members while promoting excellence in nursing practice, education, research, and community service.
           </p>
           <p>
             PNAA connects over 4,000 nurses across 55 chapters throughout the
@@ -36,9 +32,25 @@ export default function AboutPage() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           <p>
-            To be the leading professional nursing organization that promotes
-            excellence in nursing practice, education, and research among
-            Filipino-American nurses in the United States and globally.
+            To be the premier professional nursing organization that empowers Filipino-American nurses to lead, 
+            innovate, and advance healthcare in the United States and around the world.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Our Impact</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+           PNAA connects a national network of over 4,000 nurses across 50+ chapters, fostering:
+
+          Professional development and leadership opportunities
+          Community outreach and public health initiatives
+          Cultural preservation and collaboration within the Filipino-American community
+
+          Through its chapters and national programs, PNAA continues to make meaningful contributions to healthcare delivery and advocacy.
           </p>
         </CardContent>
       </Card>
@@ -101,11 +113,8 @@ export default function AboutPage() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           <p>
-            This platform streamlines member details, events, community
-            outreach, and fundraising into a unified tool viewable at both the
-            chapter and national level. Member and event data is synced from Wild
-            Apricot, while fundraising and user-created content is managed
-            entirely within the platform.
+            The PNAA Chapter Management Platform is designed to centralize and streamline operations across chapters and the national organization.   
+            Member and event data are integrated from Wild Apricot, while fundraising and custom content are managed directly within the platform—providing a comprehensive, real-time view at both the chapter and national levels.
           </p>
         </CardContent>
       </Card>
