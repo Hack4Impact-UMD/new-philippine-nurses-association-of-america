@@ -40,7 +40,8 @@ yarn-error.log*
 .env.test.local
 .env.staging.local
 .env.example
-/functions/.env.pnaa-chapter-management
+functions/.env.*
+functions/.env.pnaa-chapter-management
 
 # vercel
 .vercel
