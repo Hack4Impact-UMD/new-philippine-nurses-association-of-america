@@ -123,7 +123,7 @@ export function CampaignList() {
 
   const constraints = useMemo(() => {
     const c = [];
-    if (!showArchived) c.push(where("archived", "==", false));
+    c.push(where("archived", "==", showArchived));
     c.push(orderBy("date", "desc"));
     return c;
   }, [showArchived]);
@@ -195,7 +195,11 @@ export function CampaignList() {
           globalFilter={debouncedSearch}
           onRowClick={(campaign) => router.push(`/fundraising/${campaign.id}`)}
           emptyTitle="No campaigns found"
-          emptyDescription="No fundraising campaigns yet"
+          emptyDescription={
+            showArchived
+              ? "No archived campaigns available"
+              : "No fundraising campaigns yet"
+          }
           emptyIcon={DollarSign}
           defaultPageSize={15}
           exportFilename="PNAA_fundraising_campaigns"
@@ -211,7 +215,11 @@ export function CampaignList() {
           icon={DollarSign}
           title="No campaigns found"
           description={
-            search ? "Try adjusting your search" : "No fundraising campaigns yet"
+            search
+              ? "Try adjusting your search"
+              : showArchived
+              ? "No archived campaigns available"
+              : "No fundraising campaigns yet"
           }
         />
       ) : (

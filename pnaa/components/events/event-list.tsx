@@ -190,7 +190,7 @@ export function EventList() {
 
   const constraints = useMemo(() => {
     const c = [];
-    if (!showArchived) c.push(where("archived", "==", false));
+    c.push(where("archived", "==", showArchived));
     if (filterMode === "upcoming") {
       c.push(where("startDate", ">=", today));
       c.push(orderBy("startDate", "asc"));
@@ -271,7 +271,11 @@ export function EventList() {
           globalFilter={debouncedSearch}
           onRowClick={(event) => router.push(`/events/${event.id}`)}
           emptyTitle="No events found"
-          emptyDescription="No events match the current filter"
+          emptyDescription={
+            showArchived
+              ? "No archived events available"
+              : "No events match the current filter"
+          }
           emptyIcon={Calendar}
           defaultPageSize={15}
           exportFilename="PNAA_events"
@@ -287,7 +291,11 @@ export function EventList() {
           icon={Calendar}
           title="No events found"
           description={
-            search ? "Try adjusting your search" : "No events match the current filter"
+            search
+              ? "Try adjusting your search"
+              : showArchived
+              ? "No archived events available"
+              : "No events match the current filter"
           }
         />
       ) : (
