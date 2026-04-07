@@ -6,3 +6,4 @@ pnaa/.env.local
 pnaa/.env
 functions/.env
 functions/.env.*
+*-debug.log
