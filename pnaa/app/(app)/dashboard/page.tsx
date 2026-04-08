@@ -10,8 +10,10 @@ import { UpcomingEvents } from "@/components/dashboard/upcoming-events";
 import { FundraisingProgress } from "@/components/dashboard/fundraising-progress";
 import { PageHeader } from "@/components/shared/page-header";
 import type { Chapter } from "@/types/chapter";
+import type { ChapterAlias } from "@/types/chapter-alias";
 import type { AppEvent } from "@/types/event";
 import type { FundraisingCampaign } from "@/types/fundraising";
+import { MembershipTrendsGraph } from "@/components/dashboard/membership-trends-graph"
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -19,6 +21,7 @@ export default function DashboardPage() {
   const today = new Date().toISOString().split("T")[0];
 
   const { data: chapters } = useCollection<Chapter>("chapters");
+  const { data: chapterAliases } = useCollection<ChapterAlias>("chapter_aliases");
 
   const eventConstraints = useMemo(
     () => [
@@ -65,8 +68,9 @@ export default function DashboardPage() {
             ? "National Dashboard"
             : `${user?.chapterName || "Chapter"} Dashboard`
         }
-        description="Overview of your organization"
+        description="The Philippine Nurses Association of America represents 65 chapters with over 13,000+ members. We uphold the positive image and welfare of Filipino-American nurses, promote professional excellence, and contribute to significant outcomes to healthcare and society through education, research, and clinical practice. "
       />
+      <MembershipTrendsGraph chapters={chapters} aliases={chapterAliases}/>
 
       <StatsCards stats={stats} />
 
@@ -78,9 +82,6 @@ export default function DashboardPage() {
         )}
         <div className={isNationalAdmin ? "" : "lg:col-span-2"}>
           <UpcomingEvents events={upcomingEvents} />
-        </div>
-        <div>
-          <FundraisingProgress campaigns={campaigns} />
         </div>
       </div>
     </div>
