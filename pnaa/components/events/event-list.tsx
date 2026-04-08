@@ -220,12 +220,15 @@ export function EventList() {
   }, [showArchived]);
 
   useEffect(() => {
-    if (justToggledArchived.current && !loading && !data.some((e) => e.archived)) {
-      toast.info("No archived events", {
-        description: "All events in this view are currently active.",
-        duration: 3000,
-        style: { background: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" },
-      });
+    if (justToggledArchived.current && !loading) {
+      if (!data.some((e) => e.archived)) {
+        toast.info("No archived events", {
+          description: "All events in this view are currently active.",
+          duration: 3000,
+          style: { background: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" },
+          classNames: { description: "!text-blue-500" },
+        });
+      }
       justToggledArchived.current = false;
     }
   }, [loading, data]);
