@@ -228,8 +228,8 @@ export function MembershipTrendsGraph({ chapters, aliases }: MembershipTrendsGra
               top: 20,
               backgroundColor:"rgba(255, 255,255, 0.7)",
               padding: "6px 8px",
-              borderRadius: "8px",
-              fontSize: "11px,"}}/>
+              borderRadius: "8px"
+              }}/>
             {viewBy === "total" && (
               <>
                 <Bar
