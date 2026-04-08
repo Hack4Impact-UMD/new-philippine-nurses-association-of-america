@@ -83,9 +83,6 @@ export default function DashboardPage() {
         <div className={isNationalAdmin ? "" : "lg:col-span-2"}>
           <UpcomingEvents events={upcomingEvents} />
         </div>
-        <div>
-          <FundraisingProgress campaigns={campaigns} />
-        </div>
       </div>
     </div>
   );

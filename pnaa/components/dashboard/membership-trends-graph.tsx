@@ -229,7 +229,7 @@ export function MembershipTrendsGraph({ chapters, aliases }: MembershipTrendsGra
               backgroundColor:"rgba(255, 255,255, 0.7)",
               padding: "6px 8px",
               borderRadius: "8px",
-              fontSize: "11px,"}}/>
+              fontSize: "11px"}}/>
             {viewBy === "total" && (
               <>
                 <Bar
