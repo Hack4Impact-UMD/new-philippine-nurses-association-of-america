@@ -8,11 +8,11 @@ const metricConfig = [
   { key: "volunteers" as const, label: "Volunteers", icon: HandHelping },
 
   { key: "contactHours" as const, label: "Contact Hours", icon: Clock },
-  // {
-  //   key: "volunteerHours" as const,
-  //   label: "Volunteer Hours",
-  //   icon: UserCheck,
-  // },
+  {
+    key: "volunteerHours" as const,
+    label: "Volunteer Hours",
+    icon: UserCheck,
+  },
 ];
 
 export function EventMetrics({ event }: { event: AppEvent }) {
