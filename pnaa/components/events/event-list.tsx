@@ -1,4 +1,4 @@
-"use client";
+   "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -103,17 +103,6 @@ const columns: ColumnDef<EventRow, unknown>[] = [
     cell: ({ row }) => (
       <span className="tabular-nums text-sm">
         {row.original.attendees > 0 ? row.original.attendees.toLocaleString() : "—"}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "guests",
-    header: "Guests",
-    size: 100,
-    enableSorting: true,
-    cell: ({ row }) => (
-      <span className="tabular-nums text-sm">
-        {row.original.guests > 0 ? row.original.guests.toLocaleString() : "—"}
       </span>
     ),
   },
@@ -243,18 +232,19 @@ export function EventList() {
 
   useEffect(() => {
     if (justToggledArchived.current && !loading && data) {
-      if (!data.some((e) => e.archived)) {
+      if (data.length > 0 && !data.some((e) => e.archived)) {
         toast.info("No archived events", {
           description: "All events in this view are currently active.",
           duration: 3000,
-          style: { background: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" },
-          classNames: { description: "!text-blue-500" },
+          classNames: {
+            toast: "bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800",
+            title: "text-blue-700 dark:text-blue-300",
+            description: "text-blue-500 dark:text-blue-400",
+          },
         });
       }
       justToggledArchived.current = false;
-    }
-  }, [loading, data]);
-  // Cards view still uses client-side filtering
+    }  }, [loading, data]);  // Cards view still uses client-side filtering
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return data;
     const q = debouncedSearch.toLowerCase();

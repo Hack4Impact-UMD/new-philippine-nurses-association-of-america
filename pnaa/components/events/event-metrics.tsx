@@ -5,11 +5,6 @@ import type { AppEvent } from "@/types/event";
 const metricConfig = [
   { key: "totalRevenue" as const, label: "Total Revenue", icon: CircleDollarSign },
   { key: "attendees" as const, label: "Attendees", icon: Users },
-  {
-    key: "guests" as const,
-    label: "Guests",
-    icon: Heart,
-  },
   { key: "volunteers" as const, label: "Volunteers", icon: HandHelping },
 
   { key: "contactHours" as const, label: "Contact Hours", icon: Clock },
