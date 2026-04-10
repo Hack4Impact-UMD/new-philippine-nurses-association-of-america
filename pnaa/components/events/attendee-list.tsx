@@ -33,6 +33,16 @@ export function AttendeeList({ eventId }: { eventId: string }) {
     return () => { activeRef.current = false; };
   }, [eventId]);
 
+  // Sort: largest paid first, then free, then unpaid
+  const sortedRows = useMemo(() => {
+    const sortKey = (row: AttendeeRow) => {
+      if (row.registrationFee === 0) return 1_000_000;   // free: middle
+      if (row.isPaid) return -row.paidSum;                // paid: higher amount sorts first
+      return 2_000_000;                                   // unpaid: last
+    };
+    return [...rows].sort((a, b) => sortKey(a) - sortKey(b));
+  }, [rows]);
+
   // Map registrationId -> name for resolving attendee names
   const registrationNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -62,7 +72,7 @@ export function AttendeeList({ eventId }: { eventId: string }) {
         ),
       },
       {
-        accessorKey: "Type",
+        accessorKey: "registrationType",
         header: "Registration Type",
         size: 90,
         enableSorting: true,
@@ -77,7 +87,11 @@ export function AttendeeList({ eventId }: { eventId: string }) {
         header: "Payment",
         size: 100,
         enableSorting: true,
-        filterFn: "equals",
+        filterFn: (row, _columnId, filterValue) => {
+          if (filterValue === "true") return row.original.isPaid;
+          if (filterValue === "false") return !row.original.isPaid;
+          return true;
+        },
         meta: {
           filterType: "select",
           filterOptions: [
@@ -85,7 +99,12 @@ export function AttendeeList({ eventId }: { eventId: string }) {
             { label: "No", value: "false" },
           ],
         } satisfies ColumnMeta,
-        accessorFn: (row) => String(row.isPaid),
+        //orders rows by: free first, then paid (sorted by amount), then unpaid last
+        accessorFn: (row) => {
+          if (row.registrationFee === 0) return 1_000_000;
+          if (row.isPaid) return -row.paidSum;
+          return 2_000_000;
+        },
         cell: ({ row }) =>
           row.original.isPaid ? (
             row.original.registrationFee == 0 ? (
@@ -110,7 +129,7 @@ export function AttendeeList({ eventId }: { eventId: string }) {
   return (
     <AdvancedDataTable<AttendeeRow>
       columns={columns}
-      data={rows}
+      data={sortedRows}
       loading={loading}
       emptyTitle="No attendees"
       emptyDescription="No registrations found for this event"
