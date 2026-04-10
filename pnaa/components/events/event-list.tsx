@@ -220,7 +220,7 @@ export function EventList() {
   }, [showArchived]);
 
   useEffect(() => {
-    if (justToggledArchived.current && !loading) {
+    if (justToggledArchived.current && !loading && data) {
       if (!data.some((e) => e.archived)) {
         toast.info("No archived events", {
           description: "All events in this view are currently active.",
@@ -232,7 +232,6 @@ export function EventList() {
       justToggledArchived.current = false;
     }
   }, [loading, data]);
-
   // Cards view still uses client-side filtering
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return data;
