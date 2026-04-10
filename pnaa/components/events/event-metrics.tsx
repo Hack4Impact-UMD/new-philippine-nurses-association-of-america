@@ -1,15 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, HandHelping, Clock, UserCheck, Heart } from "lucide-react";
+import { Users, HandHelping, Clock, UserCheck, Heart, CircleDollarSign } from "lucide-react";
 import type { AppEvent } from "@/types/event";
 
 const metricConfig = [
+  { key: "totalRevenue" as const, label: "Total Revenue", icon: CircleDollarSign },
   { key: "attendees" as const, label: "Attendees", icon: Users },
   { key: "volunteers" as const, label: "Volunteers", icon: HandHelping },
-  {
-    key: "participantsServed" as const,
-    label: "Participants Served",
-    icon: Heart,
-  },
+
   { key: "contactHours" as const, label: "Contact Hours", icon: Clock },
   {
     key: "volunteerHours" as const,
@@ -41,7 +38,11 @@ export function EventMetrics({ event }: { event: AppEvent }) {
           <Card key={metric.key}>
             <CardContent className="pt-4 pb-4 flex flex-col items-center text-center">
               <metric.icon className="h-5 w-5 text-primary mb-2" />
-              <span className="text-2xl font-bold">{event[metric.key]}</span>
+              <span className="text-2xl font-bold">
+                {metric.key === "totalRevenue"
+                  ? `$${(event[metric.key] ?? 0).toLocaleString("en-US")}`
+                  : event[metric.key]}
+              </span>
               <span className="text-xs text-muted-foreground mt-1">
                 {metric.label}
               </span>

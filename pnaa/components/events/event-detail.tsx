@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EventMetrics } from "./event-metrics";
-import { formatDate, formatDateRange } from "@/lib/utils";
+import { AttendeeList } from "./attendee-list";
+import { formatDateRange } from "@/lib/utils";
 import { Pencil, Calendar, MapPin, Clock, Building2 } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-auth";
 import type { AppEvent } from "@/types/event";
@@ -112,6 +113,16 @@ export function EventDetail({ eventId }: { eventId: string }) {
 
       {/* Metrics */}
       <EventMetrics event={event} />
+
+      {/* Attendees */}
+      <Card className = "p-10"> 
+        <CardHeader>
+          <CardTitle className="text-base">Attendees</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <AttendeeList eventId={eventId} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

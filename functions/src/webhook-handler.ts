@@ -27,6 +27,7 @@ import {
   getWAAccountId,
   fetchWAContact,
   fetchWAEvent,
+  fetchWARegistration,
   mapContactToMember,
   chapterSlug,
 } from "./wa-utils";
@@ -70,6 +71,18 @@ export const wildApricotWebhook = onRequest(async (req, res) => {
         const eventId = String(Parameters["Event.Id"]);
         const action = String(Parameters["Action"]) as "Created" | "Changed" | "Deleted";
         await handleEvent(eventId, action);
+        break;
+      }
+
+      case "EventRegistration": {
+        const eventId = String(Parameters["EventToRegister.Id"]);
+        const registrationId = String(Parameters["Registration.Id"]);
+        const action = String(Parameters["Action"]) as "Created" | "Changed" | "Deleted";
+        // Registration.Status is absent for Deleted actions
+        const webhookStatus = action !== "Deleted"
+          ? String(Parameters["Registration.Status"] ?? "")
+          : null;
+        await handleEventRegistration(eventId, registrationId, action, webhookStatus);
         break;
       }
 
@@ -163,6 +176,148 @@ async function handleContact(waContactId: string): Promise<void> {
   if (chapterUpdates > 0) await chapterBatch.commit();
 
   console.log(`wildApricotWebhook: updated member ${member.memberId} (${member.name})`);
+}
+
+async function handleEventRegistration(
+  eventId: string,
+  registrationId: string,
+  action: "Created" | "Changed" | "Deleted",
+  webhookStatus: string | null
+): Promise<void> {
+  console.log(`wildApricotWebhook [EventRegistration]: action=${action} eventId=${eventId} registrationId=${registrationId} webhookStatus=${webhookStatus ?? "absent"}`);
+
+  const db = getFirestore();
+  const eventRef = db.collection("events").doc(eventId);
+  // Doc ID is registrationId — Deleted can target it directly without a Firestore query
+  const attendeeRef = eventRef.collection("attendees").doc(registrationId);
+
+  // Deleted: remove the element.
+  if (action === "Deleted") {
+    console.log(`wildApricotWebhook [EventRegistration/Deleted]: check  if attendee doc ${registrationId} exists`);
+    const existing = await attendeeRef.get();
+    if (!existing.exists) {
+      console.log(`wildApricotWebhook [EventRegistration/Deleted]: attendee ${registrationId} not found in Firestore — nothing to delete`);
+      return;
+    }
+    const existingData = existing.data() ?? {};
+    const oldPaidSum = Number(existingData.paidSum ?? 0);
+    const oldStatus = String(existingData.Status ?? "");
+    const wasIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
+
+    const batch = db.batch();
+    batch.delete(attendeeRef);
+    const eventDoc = await eventRef.get();
+    if (!eventDoc.exists) {
+      console.log(`wildApricotWebhook [EventRegistration/Deleted]: event ${eventId} not found — deleting orphaned attendee only`);
+      await attendeeRef.delete();
+      return;
+    }
+    batch.update(eventRef, {
+      attendees: FieldValue.increment(-1),
+      registrations: FieldValue.increment(-1),
+      ...(oldPaidSum !== 0 && { totalRevenue: FieldValue.increment(-oldPaidSum) }),
+      ...(wasIncomplete && { incompleteRegistrations: FieldValue.increment(-1) }),
+      lastUpdated: Timestamp.now(),
+      lastUpdatedUser: "WildApricot",
+    });
+    await batch.commit();
+    console.log(`wildApricotWebhook [EventRegistration/Deleted]: deleted attendee ${registrationId} from event ${eventId}, revenue: -${oldPaidSum}, incomplete: ${wasIncomplete ? "-1" : "0"})`);
+    return;
+  }
+
+  console.log(`wildApricotWebhook [EventRegistration/${action}]: fetching registration ${registrationId} from WA`);
+  const token = await getWAToken();
+  const accountId = getWAAccountId();
+
+  const registration = await fetchWARegistration(token, accountId, registrationId);
+  if (!registration) {
+    console.error(`wildApricotWebhook [EventRegistration/${action}]: registration ${registrationId} not found in WA (404) — skipping`);
+    return;
+  }
+
+  console.log(`wildApricotWebhook [EventRegistration/${action}]: fetched registration — name="${registration.name}" contactId=${registration.contactId} status=${registration.Status}`);
+
+  const attendeeData = {
+    registrationId: registration.registrationId,
+    eventId: registration.eventId,
+    contactId: registration.contactId,
+    name: registration.name,
+    registrationTypeId: registration.registrationTypeId,
+    registrationType: registration.registrationType,
+    organization: registration.organization,
+    isPaid: registration.isPaid,
+    registrationFee: registration.registrationFee,
+    paidSum: registration.paidSum,
+    OnWaitlist: registration.OnWaitlist,
+    Status: webhookStatus ?? registration.Status,
+  };
+
+
+  const newPaidSum = attendeeData.paidSum;
+  const newStatus = attendeeData.Status;
+  const newIsIncomplete = newStatus !== "Paid" && newStatus !== "Free";
+
+  if (action === "Created") {
+    console.log(`wildApricotWebhook [EventRegistration/Created]: checking if attendee doc ${registrationId} already exists`);
+    const existingAttendee = await attendeeRef.get();
+    if (existingAttendee.exists) {
+      console.log(`wildApricotWebhook [EventRegistration/Created]: attendee ${registrationId} already exists — updating without incrementing count`);
+      await attendeeRef.set(attendeeData);
+      return;
+    }
+
+    console.log(`wildApricotWebhook [EventRegistration/Created]: checking event doc ${eventId} exists`);
+    const eventDoc = await eventRef.get();
+    if (!eventDoc.exists) {
+      console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found in Firestore — skipping attendee creation`);
+      return;
+    }
+
+    const batch = db.batch();
+    batch.set(attendeeRef, attendeeData);
+    batch.update(eventRef, {
+      attendees: FieldValue.increment(1),
+      registrations: FieldValue.increment(1),
+      ...(newPaidSum !== 0 && { totalRevenue: FieldValue.increment(newPaidSum) }),
+      ...(newIsIncomplete && { incompleteRegistrations: FieldValue.increment(1) }),
+      lastUpdated: Timestamp.now(),
+      lastUpdatedUser: "WildApricot",
+    });
+    await batch.commit();
+    console.log(`wildApricotWebhook [EventRegistration/Created]: added attendee ${registrationId} to event ${eventId} (revenue: +${newPaidSum}, incomplete: ${newIsIncomplete ? "+1" : "0"})`);
+  } else {
+    // Changed — overwrite doc, compute deltas against old Firestore values
+    console.log(`wildApricotWebhook [EventRegistration/Changed]: checking if attendee doc ${registrationId} exists`);
+    const [existingAttendee, eventDoc] = await Promise.all([attendeeRef.get(), eventRef.get()]);
+    if (!existingAttendee.exists) {
+      console.error(`wildApricotWebhook [EventRegistration/Changed]: attendee ${registrationId} not found in Firestore — skipping update`);
+      return;
+    }
+    if (!eventDoc.exists) {
+      console.error(`wildApricotWebhook [EventRegistration/Changed]: event ${eventId} not found in Firestore — updating attendee only`);
+      await attendeeRef.set(attendeeData);
+      return;
+    }
+
+    const oldData = existingAttendee.data() ?? {};
+    const oldPaidSum = Number(oldData.paidSum ?? 0);
+    const oldStatus = String(oldData.Status ?? "");
+    const oldIsIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
+
+    const revenueDelta = newPaidSum - oldPaidSum;
+    const incompleteDelta = (newIsIncomplete ? 1 : 0) - (oldIsIncomplete ? 1 : 0);
+
+    const batch = db.batch();
+    batch.set(attendeeRef, attendeeData);
+    batch.update(eventRef, {
+      ...(revenueDelta !== 0 && { totalRevenue: FieldValue.increment(revenueDelta) }),
+      ...(incompleteDelta !== 0 && { incompleteRegistrations: FieldValue.increment(incompleteDelta) }),
+      lastUpdated: Timestamp.now(),
+      lastUpdatedUser: "WildApricot",
+    });
+    await batch.commit();
+    console.log(`wildApricotWebhook [EventRegistration/Changed]: updated attendee ${registrationId} on event ${eventId} (revenueDelta: ${revenueDelta}, incompleteDelta: ${incompleteDelta})`);
+  }
 }
 
 async function handleEvent(
