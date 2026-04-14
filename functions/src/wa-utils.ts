@@ -295,7 +295,7 @@ export async function fetchWARegistration(
     eventId: String(event.Id ?? ""),
     contactId: String(contact.Id ?? ""),
     name: String(reg.DisplayName ?? contact.Name ?? ""),
-    registrationTypeId: String(reg.RegistrationTypeId ?? ""),
+    registrationTypeId: String(regType.Id ?? ""),
     registrationType: String(regType.Name ?? ""),
     organization: String(reg.Organization ?? ""),
     isPaid: Boolean(reg.IsPaid ?? false),
