@@ -283,23 +283,19 @@ async function handleEventRegistration(
   }
 
   if (!eventDoc.exists) {
-  // Event still missing after retries — write a durable pending record.
-  console.error(
-    `wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`
-  );
-  await db.collection("pendingRegistrations").doc(registrationId).set({
-    eventId,
-    registrationId,
-    attendeeData,
-    retryCount: 0,
-    createdAt: Timestamp.now(),
-  });
-  return;
-}
-      console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found in Firestore — skipping attendee creation`);
+      // Event still missing after retries — write a durable pending record.
+      console.error(
+        `wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`
+      );
+      await db.collection("pendingRegistrations").doc(registrationId).set({
+        eventId,
+        registrationId,
+        attendeeData,
+        retryCount: 0,
+        createdAt: Timestamp.now(),
+      });
       return;
     }
-
     const batch = db.batch();
     batch.set(attendeeRef, attendeeData);
     batch.update(eventRef, {
@@ -345,6 +341,7 @@ async function handleEventRegistration(
     await batch.commit();
     console.log(`wildApricotWebhook [EventRegistration/Changed]: updated attendee ${registrationId} on event ${eventId} (revenueDelta: ${revenueDelta}, incompleteDelta: ${incompleteDelta})`);
   }
+}
 }
 
 async function handleEvent(

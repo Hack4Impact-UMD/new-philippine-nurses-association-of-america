@@ -1,4 +1,4 @@
-export interface AppEvent {
+export interface Attendee {
       registrationId: string;
       eventId: string;
       contactId: string;

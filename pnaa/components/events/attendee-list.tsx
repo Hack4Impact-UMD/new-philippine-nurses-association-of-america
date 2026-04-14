@@ -1,36 +1,34 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { collection, query, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { AdvancedDataTable, type ColumnDef, type ColumnMeta } from "@/components/shared/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Users } from "lucide-react";
-import type { AppEvent as Attendee } from "@/types/attendee";
+import type { Attendee } from "@/types/attendee";
 
 type AttendeeRow = Attendee & { id: string };
 
 export function AttendeeList({ eventId }: { eventId: string }) {
   const [rows, setRows] = useState<AttendeeRow[]>([]);
   const [loading, setLoading] = useState(true);
-  // Track whether this effect invocation is still current so strict-mode's
-  // double-invoke doesn't apply a stale fetch after the component moves on.
-  const activeRef = useRef(true);
 
   useEffect(() => {
-    activeRef.current = true;
+    // Per-run flag: check if cancelled before setting state,
+    let cancelled = false;
     setLoading(true);
 
     getDocs(query(collection(db, "events", eventId, "attendees")))
       .then((snapshot) => {
-        if (!activeRef.current) return;
+        if (cancelled) return;
         setRows(snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as AttendeeRow));
       })
       .finally(() => {
-        if (activeRef.current) setLoading(false);
+        if (!cancelled) setLoading(false);
       });
 
-    return () => { activeRef.current = false; };
+    return () => { cancelled = true; };
   }, [eventId]);
 
   // Sort: largest paid first, then free, then unpaid
