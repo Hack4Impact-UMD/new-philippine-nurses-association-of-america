@@ -195,11 +195,13 @@ export const syncEvents = onRequest(
           headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
         });
 
-        // If the event has no registrations, WA returns 404 - break loop and return empty registrations
         if (!regResponse.ok) {
+          // WA returns 404 for events with no registrations - treat as empty
+          if (regResponse.status === 404) {
+            break;
+          }
           throw new Error(`Registrations fetch failed for event ${eventId} at skip=${regSkip}: ${regResponse.status} ${regResponse.statusText}`);
         }
-
         // Successful response - registrations exist, and added to the allRegistrations array
         const regData = await regResponse.json();
         const page: Record<string, unknown>[] = Array.isArray(regData)
