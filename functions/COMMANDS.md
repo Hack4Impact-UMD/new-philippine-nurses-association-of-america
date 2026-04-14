@@ -34,9 +34,70 @@ firebase deploy --only functions:syncMembers,functions:syncEvents
 
 ---
 
-## Local Sync (runs against production Firestore directly)
+## Local Sync Overview
 
-These run on your machine but write to the real production database. No deploy needed.
+The sync scripts fetch data from **Wild Apricot** (read-only) and write to **Firestore**.
+
+```
+Wild Apricot (source) ──READ──► Sync Script ──WRITE──► Firestore (staging OR production)
+```
+
+- **Wild Apricot is never modified** — data only flows out
+- **Only ONE Firestore project is written to per run** — staging and production are isolated
+- Use `--staging` flag (or staging scripts) to write to staging instead of production
+
+---
+
+## Sync to STAGING (Safe for Testing)
+
+Use these commands to populate the staging database. **Production is never touched.**
+
+### Sync everything to staging
+
+```bash
+npm run sync:staging
+```
+
+### Sync members & chapters to staging
+
+```bash
+npm run sync:staging:members
+```
+
+**With flags** (pass after `--`):
+
+```bash
+# First 5000 contacts only
+npm run sync:staging:members -- --limit 5000
+
+# Skip first 10000, sync the rest
+npm run sync:staging:members -- --from 10000
+
+# Contacts 5000–9999 (start at 5000, take 5000)
+npm run sync:staging:members -- --from 5000 --limit 5000
+```
+
+### Sync events to staging
+
+```bash
+npm run sync:staging:events
+```
+
+### Recommended: Sync 22k contacts in chunks (staging)
+
+```bash
+# Day 1: First 10,000 contacts
+npm run sync:staging:members -- --limit 10000
+
+# Day 2: Remaining contacts
+npm run sync:staging:members -- --from 10000
+```
+
+---
+
+## Sync to PRODUCTION
+
+These run on your machine but write to the **real production database**. Use with caution.
 
 ### Sync everything
 
