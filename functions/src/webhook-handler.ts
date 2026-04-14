@@ -32,6 +32,10 @@ import {
   chapterSlug,
 } from "./wa-utils";
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 const WEBHOOK_SECRET = defineString("WEBHOOK_SECRET");
 
 interface WAWebhookBody {
@@ -235,7 +239,7 @@ async function handleEventRegistration(
     return;
   }
 
-  console.log(`wildApricotWebhook [EventRegistration/${action}]: fetched registration — name="${registration.name}" contactId=${registration.contactId} status=${registration.Status}`);
+  console.log(`wildApricotWebhook [EventRegistration/${action}]: event ${registration.eventId} - registration ${registrationId}`);
 
   const attendeeData = {
     registrationId: registration.registrationId,
@@ -267,8 +271,31 @@ async function handleEventRegistration(
     }
 
     console.log(`wildApricotWebhook [EventRegistration/Created]: checking event doc ${eventId} exists`);
-    const eventDoc = await eventRef.get();
+    let eventDoc = await eventRef.get();
     if (!eventDoc.exists) {
+      const MAX_ATTEMPTS = 4;
+  const BASE_DELAY_MS = 500;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS && !eventDoc.exists; attempt++) {
+    const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // Doubles wait time each interval -> 500 to 4000ms
+    console.log(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found — retry ${attempt}/${MAX_ATTEMPTS} in ${delay}ms`);
+    await sleep(delay); // Defined at top of file
+    eventDoc = await eventRef.get();
+  }
+
+  if (!eventDoc.exists) {
+  // Event still missing after retries — write a durable pending record.
+  console.error(
+    `wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`
+  );
+  await db.collection("pendingRegistrations").doc(registrationId).set({
+    eventId,
+    registrationId,
+    attendeeData,
+    retryCount: 0,
+    createdAt: Timestamp.now(),
+  });
+  return;
+}
       console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found in Firestore — skipping attendee creation`);
       return;
     }
