@@ -241,7 +241,7 @@ export const syncEvents = onRequest(
           registrationId,
           eventId: String(regEvent.Id ?? ""),
           contactId,
-          name: String(reg.DisplayName ?? ""),
+          name: String(reg.DisplayName ?? contact.Name ?? ""),
           registrationTypeId: String(regType.Id ?? ""),
           registrationType: String(regType.Name ?? ""),
           organization: String(reg.Organization ?? ""),
