@@ -9,6 +9,7 @@ import { EventCard } from "./event-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ViewToggle, type ViewMode } from "@/components/shared/view-toggle";
 import { AdvancedDataTable, type ColumnDef, type ColumnMeta } from "@/components/shared/advanced-data-table";
+import { EventAttendanceChart } from "./event-attendance-chart";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -285,6 +286,8 @@ export function EventList() {
           <ViewToggle view={view} onViewChange={handleViewChange} />
         </div>
       </div>
+
+      <EventAttendanceChart events={data} loading={loading} />
 
       {view === "table" ? (
         <AdvancedDataTable<EventRow>
