@@ -11,12 +11,18 @@ interface Props {
 }
 
 function formatMonth(ym: string) {
-  const [y, m] = ym.split("-");
-  return new Date(Number(y), Number(m) - 1).toLocaleString("default", {
+  const parts = ym.split("-");
+  if (parts.length < 2) return "";
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return "";
+  return new Date(y, m - 1).toLocaleString("default", {
     month: "short",
     year: "2-digit",
   });
 }
+
+const MONTH_KEY_RE = /^\d{4}-\d{2}$/;
 
 function formatCurrency(v: number) {
   return "$" + v.toLocaleString();
@@ -26,8 +32,9 @@ export function FundraisingChart({ campaigns, loading }: Props) {
   const chartData = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of campaigns) {
-      if (!c.date) continue;
+      if (!c.date || c.date.length < 7) continue;
       const month = c.date.slice(0, 7);
+      if (!MONTH_KEY_RE.test(month)) continue;
       map.set(month, (map.get(month) ?? 0) + (c.amount ?? 0));
     }
     return Array.from(map.entries())
@@ -76,7 +83,13 @@ export function FundraisingChart({ campaigns, loading }: Props) {
             <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={52} tickFormatter={(v) => "$" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
-              formatter={(value: number) => [formatCurrency(value), "Raised"]}
+              formatter={(value) => {
+                const formatted =
+                  typeof value === "number" && Number.isFinite(value)
+                    ? formatCurrency(value)
+                    : String(value ?? formatCurrency(0));
+                return [formatted, "Raised"];
+              }}
             />
             <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
           </BarChart>
