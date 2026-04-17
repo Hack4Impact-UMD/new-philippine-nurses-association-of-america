@@ -8,9 +8,10 @@ type ChapterRow = Chapter & { id: string };
 
 interface Props {
   chapters: ChapterRow[];
+  loading?: boolean;
 }
 
-export function ChapterActivityChart({ chapters }: Props) {
+export function ChapterActivityChart({ chapters, loading }: Props) {
   const regions = useMemo(() => {
     const set = new Set(chapters.map((c) => c.region).filter(Boolean));
     return ["All", ...Array.from(set).sort()];
@@ -29,6 +30,19 @@ export function ChapterActivityChart({ chapters }: Props) {
   }, [chapters, selectedRegion]);
 
   const max = Math.max(1, ...bars.map((c) => c.totalActive));
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Active Members by Chapter</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-40 w-full rounded-md bg-muted animate-pulse" />
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (bars.length === 0) {
     return (
@@ -79,7 +93,7 @@ export function ChapterActivityChart({ chapters }: Props) {
               </span>
               {/* Bar — height in px relative to a 160px max */}
               <div
-                className="w-full bg-emerald-500 rounded-t transition-all"
+                className="w-full bg-blue-500 rounded-t transition-all"
                 style={{ height: `${(chapter.totalActive / max) * 160}px` }}
               />
               {/* Chapter name — truncated */}

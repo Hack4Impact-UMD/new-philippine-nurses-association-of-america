@@ -241,7 +241,7 @@ export function ChapterList() {
         <ViewToggle view={view} onViewChange={handleViewChange} />
       </div>
 
-      <ChapterActivityChart chapters={mergedChapters as ChapterRow[]} />
+      <ChapterActivityChart chapters={mergedChapters as ChapterRow[]} loading={loading} />
 
       {view === "table" ? (
         <AdvancedDataTable<ChapterRow>

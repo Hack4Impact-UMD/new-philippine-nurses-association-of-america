@@ -19,6 +19,7 @@ import { DollarSign } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import type { FundraisingCampaign } from "@/types/fundraising";
+import { FundraisingChart } from "./fundraising-chart";
 
 type CampaignRow = FundraisingCampaign & { id: string };
 
@@ -165,6 +166,8 @@ export function CampaignList() {
           <span className="font-semibold">{data.length}</span>
         </div>
       </div>
+
+      <FundraisingChart campaigns={data} loading={loading} />
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
