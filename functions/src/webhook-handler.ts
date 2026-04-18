@@ -283,28 +283,29 @@ async function handleEventRegistration(
     let eventDoc = await eventRef.get();
     if (!eventDoc.exists) {
       const MAX_ATTEMPTS = 4;
-  const BASE_DELAY_MS = 500;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS && !eventDoc.exists; attempt++) {
-    const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // Doubles wait time each interval -> 500 to 4000ms
-    console.log(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found — retry ${attempt}/${MAX_ATTEMPTS} in ${delay}ms`);
-    await sleep(delay); // Defined at top of file
-    eventDoc = await eventRef.get();
-  }
+      const BASE_DELAY_MS = 500;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS && !eventDoc.exists; attempt++) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // Doubles wait time each interval -> 500 to 4000ms
+        console.log(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found — retry ${attempt}/${MAX_ATTEMPTS} in ${delay}ms`);
+        await sleep(delay); // Defined at top of file
+        eventDoc = await eventRef.get();
+      }
 
-  if (!eventDoc.exists) {
-      // Event still missing after retries — write a durable pending record.
-      console.error(
-        `wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`
-      );
-      await db.collection("pendingRegistrations").doc(registrationId).set({
-        eventId,
-        registrationId,
-        attendeeData,
-        retryCount: 0,
-        createdAt: Timestamp.now(),
-      });
-      return;
-    }
+      if (!eventDoc.exists) {
+          // Event still missing after retries — write a durable pending record.
+          console.error(
+            `wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`
+          );
+          await db.collection("pendingRegistrations").doc(registrationId).set({
+            eventId,
+            registrationId,
+            attendeeData,
+            retryCount: 0,
+            createdAt: Timestamp.now(),
+          });
+          return;
+        }
+      }
     const batch = db.batch();
     batch.set(attendeeRef, attendeeData);
     batch.update(eventRef, {
@@ -350,7 +351,6 @@ async function handleEventRegistration(
     await batch.commit();
     console.log(`wildApricotWebhook [EventRegistration/Changed]: updated attendee ${registrationId} on event ${eventId} (revenueDelta: ${revenueDelta}, incompleteDelta: ${incompleteDelta})`);
   }
-}
 }
 
 async function handleEvent(
