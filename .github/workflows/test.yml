@@ -157,7 +157,6 @@ jobs:
 
       - name: Run E2E smoke tests (unauthenticated only)
         run: npm run test:e2e -- --grep "@smoke|Unauthenticated|signin" --project=chromium
-        continue-on-error: true
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
