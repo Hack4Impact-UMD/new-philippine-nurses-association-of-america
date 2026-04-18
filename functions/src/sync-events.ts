@@ -1,6 +1,6 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { defineString } from "firebase-functions/params";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import { getWAToken, getWAAccountId } from "./wa-utils";
 
 const WEBHOOK_SECRET = defineString("WEBHOOK_SECRET");
@@ -253,6 +253,25 @@ export const syncEvents = onRequest(
         });
       }
 
+      // Acquire per-event lock to prevent webhook handler from writing
+      // attendees while sync's destructive diff is in progress.
+      const LOCK_TTL_MS = 6 * 60 * 1000; // Slightly longer than function timeout
+      const lockAcquired = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(eventRef);
+        if (!snap.exists) return false;
+        const lockVal = snap.data()?.syncLock as Timestamp | undefined;
+        if (lockVal && Timestamp.now().toMillis() - lockVal.toMillis() < LOCK_TTL_MS) {
+          return false;
+        }
+        tx.update(eventRef, { syncLock: Timestamp.now() });
+        return true;
+      });
+      if (!lockAcquired) {
+        console.log(`processEvent: skipping event ${eventId} — sync lock held or event missing`);
+        return { added: 0, updated: 0, deleted: 0, registrations: 0, incomplete: 0 };
+      }
+
+      try {
       // Read existing attendees from Firestore
       const attendeeSnap = await eventRef.collection("attendees").get();
       const attendeeMap = new Map<string, Record<string, unknown>>();
@@ -300,12 +319,13 @@ export const syncEvents = onRequest(
         }
       }
 
-      // Update event-level counts
+      // Update event-level counts and release sync lock
       eventBatch.update(eventRef, {
         registrations: waRegs.size,
         attendees: waRegs.size,
         incompleteRegistrations: eventIncomplete,
         totalRevenue: totalRevenue,
+        syncLock: FieldValue.delete(),
         lastUpdated: Timestamp.now(),
         lastUpdatedUser: "WildApricot",
       });
@@ -315,6 +335,11 @@ export const syncEvents = onRequest(
       if (eventBatchCount > 0) await eventBatch.commit();
 
       return { added, updated, deleted, registrations: waRegs.size, incomplete: eventIncomplete };
+      } finally {
+        // Defensive lock release in case the batch commit failed
+        try { await eventRef.update({ syncLock: FieldValue.delete() }); }
+        catch (_e) { /* lock already cleared or event doc gone */ }
+      }
     }
 
     // Process all events in chunks of 3 concurrently
@@ -322,18 +347,21 @@ export const syncEvents = onRequest(
 
     const CHUNK_SIZE = 3;
     for (let i = 0; i < allWAEvents.length; i += CHUNK_SIZE) {
+    for (let i = 0; i < allWAEvents.length; i += CHUNK_SIZE) {
       const chunk = allWAEvents.slice(i, i + CHUNK_SIZE);
-      const results = await Promise.all(chunk.map(processEvent));
+      const results = await Promise.allSettled(chunk.map(processEvent));
       for (const r of results) {
-        totalAdded += r.added;
-        totalUpdated += r.updated;
-        totalDeleted += r.deleted;
-        totalRegistrations += r.registrations;
-        totalIncomplete += r.incomplete;
+        if (r.status === "fulfilled") {
+          totalAdded += r.value.added;
+          totalUpdated += r.value.updated;
+          totalDeleted += r.value.deleted;
+          totalRegistrations += r.value.registrations;
+          totalIncomplete += r.value.incomplete;
+        } else {
+          console.error(`processEvent failed: ${r.reason}`);
+        }
       }
-    }
-
-    const msg =
+    }    const msg =
       `syncEvents: ${added} new events added, ${skipped} skipped; ` +
       `registrations: ${totalRegistrations}, incomplete: ${totalIncomplete}; ` +
       `writes: ${totalAdded} added, ${totalUpdated} updated, ${totalDeleted} deleted`;

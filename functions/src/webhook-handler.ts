@@ -195,11 +195,20 @@ async function handleEventRegistration(
   // Doc ID is registrationId — Deleted can target it directly without a Firestore query
   const attendeeRef = eventRef.collection("attendees").doc(registrationId);
 
+  // If a full sync is in progress for this event, skip — sync is authoritative
+  const lockSnap = await eventRef.get();
+  if (lockSnap.exists) {
+    const syncLock = lockSnap.data()?.syncLock as Timestamp | undefined;
+    if (syncLock && Timestamp.now().toMillis() - syncLock.toMillis() < 5 * 60 * 1000) {
+      console.log(`wildApricotWebhook [EventRegistration]: sync in progress for event ${eventId} — skipping ${action}`);
+      return;
+    }
+  }
+
   // Deleted: remove the element.
   if (action === "Deleted") {
-    console.log(`wildApricotWebhook [EventRegistration/Deleted]: check  if attendee doc ${registrationId} exists`);
-    const existing = await attendeeRef.get();
-    if (!existing.exists) {
+    console.log(`wildApricotWebhook [EventRegistration/Deleted]: checking if attendee doc ${registrationId} exists`);
+    const existing = await attendeeRef.get();    if (!existing.exists) {
       console.log(`wildApricotWebhook [EventRegistration/Deleted]: attendee ${registrationId} not found in Firestore — nothing to delete`);
       return;
     }
