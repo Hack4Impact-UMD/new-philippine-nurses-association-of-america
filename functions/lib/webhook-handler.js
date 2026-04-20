@@ -25,6 +25,9 @@ const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
 const firestore_1 = require("firebase-admin/firestore");
 const wa_utils_1 = require("./wa-utils");
+function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+}
 const WEBHOOK_SECRET = (0, params_1.defineString)("WEBHOOK_SECRET");
 exports.wildApricotWebhook = (0, https_1.onRequest)(async (req, res) => {
     if (req.method !== "POST") {
@@ -152,9 +155,18 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
     const eventRef = db.collection("events").doc(eventId);
     // Doc ID is registrationId — Deleted can target it directly without a Firestore query
     const attendeeRef = eventRef.collection("attendees").doc(registrationId);
+    // If a full sync is in progress for this event, skip — sync is authoritative
+    const lockSnap = await eventRef.get();
+    if (lockSnap.exists) {
+        const syncLock = lockSnap.data()?.syncLock;
+        if (syncLock && firestore_1.Timestamp.now().toMillis() - syncLock.toMillis() < 6 * 60 * 1000) {
+            console.log(`wildApricotWebhook [EventRegistration]: sync in progress for event ${eventId} — skipping ${action}`);
+            return;
+        }
+    }
     // Deleted: remove the element.
     if (action === "Deleted") {
-        console.log(`wildApricotWebhook [EventRegistration/Deleted]: check  if attendee doc ${registrationId} exists`);
+        console.log(`wildApricotWebhook [EventRegistration/Deleted]: checking if attendee doc ${registrationId} exists`);
         const existing = await attendeeRef.get();
         if (!existing.exists) {
             console.log(`wildApricotWebhook [EventRegistration/Deleted]: attendee ${registrationId} not found in Firestore — nothing to delete`);
@@ -192,7 +204,7 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
         console.error(`wildApricotWebhook [EventRegistration/${action}]: registration ${registrationId} not found in WA (404) — skipping`);
         return;
     }
-    console.log(`wildApricotWebhook [EventRegistration/${action}]: fetched registration — name="${registration.name}" contactId=${registration.contactId} status=${registration.Status}`);
+    console.log(`wildApricotWebhook [EventRegistration/${action}]: event ${registration.eventId} - registration ${registrationId}`);
     const attendeeData = {
         registrationId: registration.registrationId,
         eventId: registration.eventId,
@@ -205,7 +217,7 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
         registrationFee: registration.registrationFee,
         paidSum: registration.paidSum,
         OnWaitlist: registration.OnWaitlist,
-        Status: webhookStatus ?? registration.Status,
+        Status: registration.Status || webhookStatus || "",
     };
     const newPaidSum = attendeeData.paidSum;
     const newStatus = attendeeData.Status;
@@ -219,10 +231,28 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
             return;
         }
         console.log(`wildApricotWebhook [EventRegistration/Created]: checking event doc ${eventId} exists`);
-        const eventDoc = await eventRef.get();
+        let eventDoc = await eventRef.get();
         if (!eventDoc.exists) {
-            console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found in Firestore — skipping attendee creation`);
-            return;
+            const MAX_ATTEMPTS = 4;
+            const BASE_DELAY_MS = 500;
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS && !eventDoc.exists; attempt++) {
+                const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // Doubles wait time each interval -> 500 to 4000ms
+                console.log(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found — retry ${attempt}/${MAX_ATTEMPTS} in ${delay}ms`);
+                await sleep(delay); // Defined at top of file
+                eventDoc = await eventRef.get();
+            }
+            if (!eventDoc.exists) {
+                // Event still missing after retries — write a durable pending record.
+                console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`);
+                await db.collection("pendingRegistrations").doc(registrationId).set({
+                    eventId,
+                    registrationId,
+                    attendeeData,
+                    retryCount: 0,
+                    createdAt: firestore_1.Timestamp.now(),
+                });
+                return;
+            }
         }
         const batch = db.batch();
         batch.set(attendeeRef, attendeeData);

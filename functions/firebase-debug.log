@@ -240,3 +240,273 @@ INFO: Detected non-HTTP/2 connection.
 [debug] [2026-04-10T17:55:32.268Z] Apr 10, 2026 1:55:32 PM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead
 INFO: Detected non-HTTP/2 connection.
  {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 10, 2026 1:55:32 PM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead\r\nINFO: Detected non-HTTP/2 connection.\r\n"}}
+[debug] [2026-04-20T02:02:34.292Z] ----------------------------------------------------------------------
+[debug] [2026-04-20T02:02:34.300Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\senre\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js emulators:start
+[debug] [2026-04-20T02:02:34.301Z] CLI Version:   15.13.0
+[debug] [2026-04-20T02:02:34.301Z] Platform:      win32
+[debug] [2026-04-20T02:02:34.301Z] Node Version:  v22.16.0
+[debug] [2026-04-20T02:02:34.301Z] Time:          Sun Apr 19 2026 22:02:34 GMT-0400 (Eastern Daylight Time)
+[debug] [2026-04-20T02:02:34.301Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-20T02:02:34.304Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-04-20T02:02:36.023Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-20T02:02:36.023Z] > authorizing via signed-in user (nsen@terpmail.umd.edu)
+[debug] [2026-04-20T02:02:36.123Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-04-20T02:02:36.123Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2026-04-20T02:02:36.152Z] openjdk version "25.0.2" 2026-01-20 LTS
+OpenJDK Runtime Environment Temurin-25.0.2+10 (build 25.0.2+10-LTS)
+OpenJDK 64-Bit Server VM Temurin-25.0.2+10 (build 25.0.2+10-LTS, mixed mode, sharing)
+
+[debug] [2026-04-20T02:02:36.169Z] Parsed Java major version: 25
+[info] i  emulators: Starting emulators: auth, functions, firestore, storage, extensions {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: auth, functions, firestore, storage, extensions"}}
+[debug] [2026-04-20T02:02:36.171Z] Checked if tokens are valid: false, expires at: 1776547102434
+[debug] [2026-04-20T02:02:36.171Z] Checked if tokens are valid: false, expires at: 1776547102434
+[debug] [2026-04-20T02:02:36.171Z] > refreshing access token with scopes: []
+[debug] [2026-04-20T02:02:36.172Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-04-20T02:02:36.172Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-04-20T02:02:36.282Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-04-20T02:02:36.282Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-04-20T02:02:36.288Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/projects/pnaa-chapter-management [none]
+[debug] [2026-04-20T02:02:36.472Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/projects/pnaa-chapter-management 200
+[debug] [2026-04-20T02:02:36.472Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/projects/pnaa-chapter-management {"projectNumber":"555201176203","projectId":"pnaa-chapter-management","lifecycleState":"ACTIVE","name":"pnaa-chapter-management","labels":{"firebase":"enabled","firebase-core":"disabled"},"createTime":"2026-02-28T03:21:46.799273Z","parent":{"type":"organization","id":"156752635661"}}
+[debug] [2026-04-20T02:02:36.484Z] [logging] Logging Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.484Z] [auth] Authentication Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.484Z] [firestore] Firestore Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.484Z] [firestore.websocket] websocket server for firestore only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.484Z] [storage] Storage Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.484Z] assigned listening specs for emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"auth":[{"address":"127.0.0.1","family":"IPv4","port":9099}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8080}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}],"storage":[{"address":"127.0.0.1","family":"IPv4","port":9199}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-04-20T02:02:36.489Z] Found emulator hub locator: {"version":"15.13.0","origins":["http://127.0.0.1:4400","http://[::1]:4400"],"pid":41308}
+[debug] [2026-04-20T02:02:36.489Z] Write emulator hub locator at C:\Users\senre\AppData\Local\Temp\hub-pnaa-chapter-management.json
+[debug] [2026-04-20T02:02:36.495Z] [Extensions] Started Extensions emulator, this is a noop.
+[debug] [2026-04-20T02:02:36.499Z] [functions] Functions Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.499Z] [eventarc] Eventarc Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.499Z] [tasks] Cloud Tasks Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-20T02:02:36.499Z] late-assigned ports for functions and eventarc emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"auth":[{"address":"127.0.0.1","family":"IPv4","port":9099}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8080}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}],"storage":[{"address":"127.0.0.1","family":"IPv4","port":9199}],"functions":[{"address":"127.0.0.1","family":"IPv4","port":5001}],"eventarc":[{"address":"127.0.0.1","family":"IPv4","port":9299}],"tasks":[{"address":"127.0.0.1","family":"IPv4","port":9499}]},"metadata":{"message":"late-assigned ports for functions and eventarc emulators"}}
+[warn] !  functions: The following emulators are not running, calls to these services from the Functions emulator will affect production: apphosting, database, hosting, pubsub, dataconnect {"metadata":{"emulator":{"name":"functions"},"message":"The following emulators are not running, calls to these services from the Functions emulator will affect production: \u001b[1mapphosting, database, hosting, pubsub, dataconnect\u001b[22m"}}
+[debug] [2026-04-20T02:02:36.535Z] defaultcredentials: writing to file C:\Users\senre\AppData\Roaming\firebase\nsen_terpmail_umd.edu_application_default_credentials.json
+[debug] [2026-04-20T02:02:36.537Z] Setting GAC to C:\Users\senre\AppData\Roaming\firebase\nsen_terpmail_umd.edu_application_default_credentials.json {"metadata":{"emulator":{"name":"functions"},"message":"Setting GAC to C:\\Users\\senre\\AppData\\Roaming\\firebase\\nsen_terpmail_umd.edu_application_default_credentials.json"}}
+[debug] [2026-04-20T02:02:36.538Z] Checked if tokens are valid: true, expires at: 1776654155282
+[debug] [2026-04-20T02:02:36.538Z] Checked if tokens are valid: true, expires at: 1776654155282
+[debug] [2026-04-20T02:02:36.538Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/pnaa-chapter-management/adminSdkConfig [none]
+[debug] [2026-04-20T02:02:36.945Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/pnaa-chapter-management/adminSdkConfig 200
+[debug] [2026-04-20T02:02:36.945Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/pnaa-chapter-management/adminSdkConfig {"projectId":"pnaa-chapter-management","storageBucket":"pnaa-chapter-management.firebasestorage.app"}
+[debug] [2026-04-20T02:02:36.961Z] Ignoring unsupported arg: auto_download {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: auto_download"}}
+[debug] [2026-04-20T02:02:36.961Z] Ignoring unsupported arg: single_project_mode_error {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: single_project_mode_error"}}
+[debug] [2026-04-20T02:02:36.961Z] Starting Firestore Emulator with command {"binary":"java","args":["-Dgoogle.cloud_firestore.debug_log_level=FINE","-Duser.language=en","-jar","C:\\Users\\senre\\.cache\\firebase\\emulators\\cloud-firestore-emulator-v1.20.4.jar","--host","127.0.0.1","--port",8080,"--websocket_port",9150,"--project_id","pnaa-chapter-management","--rules","C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\firestore.rules","--single_project_mode",true,"--functions_emulator","127.0.0.1:5001"],"optionalArgs":["port","webchannel_port","host","rules","websocket_port","functions_emulator","seed_from_export","project_id","single_project_mode"],"joinArgs":false,"shell":false,"port":8080} {"metadata":{"emulator":{"name":"firestore"},"message":"Starting Firestore Emulator with command {\"binary\":\"java\",\"args\":[\"-Dgoogle.cloud_firestore.debug_log_level=FINE\",\"-Duser.language=en\",\"-jar\",\"C:\\\\Users\\\\senre\\\\.cache\\\\firebase\\\\emulators\\\\cloud-firestore-emulator-v1.20.4.jar\",\"--host\",\"127.0.0.1\",\"--port\",8080,\"--websocket_port\",9150,\"--project_id\",\"pnaa-chapter-management\",\"--rules\",\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\firestore.rules\",\"--single_project_mode\",true,\"--functions_emulator\",\"127.0.0.1:5001\"],\"optionalArgs\":[\"port\",\"webchannel_port\",\"host\",\"rules\",\"websocket_port\",\"functions_emulator\",\"seed_from_export\",\"project_id\",\"single_project_mode\"],\"joinArgs\":false,\"shell\":false,\"port\":8080}"}}
+[info] i  firestore: Firestore Emulator logging to firestore-debug.log {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator logging to \u001b[1mfirestore-debug.log\u001b[22m"}}
+[debug] [2026-04-20T02:02:37.308Z] WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::allocateMemory has been called by io.netty.util.internal.PlatformDependent0$2 (file:/C:/Users/senre/.cache/firebase/emulators/cloud-firestore-emulator-v1.20.4.jar)
+WARNING: Please consider reporting this to the maintainers of class io.netty.util.internal.PlatformDependent0$2
+WARNING: sun.misc.Unsafe::allocateMemory will be removed in a future release
+ {"metadata":{"emulator":{"name":"firestore"},"message":"WARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::allocateMemory has been called by io.netty.util.internal.PlatformDependent0$2 (file:/C:/Users/senre/.cache/firebase/emulators/cloud-firestore-emulator-v1.20.4.jar)\nWARNING: Please consider reporting this to the maintainers of class io.netty.util.internal.PlatformDependent0$2\nWARNING: sun.misc.Unsafe::allocateMemory will be removed in a future release\r\n"}}
+[debug] [2026-04-20T02:02:38.211Z] Apr 19, 2026 10:02:38 PM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketServer start
+INFO: Started WebSocket server on ws://127.0.0.1:9150
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 19, 2026 10:02:38 PM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketServer start\r\nINFO: Started WebSocket server on ws://127.0.0.1:9150\r\n"}}
+[debug] [2026-04-20T02:02:38.286Z] 
+API endpoint: http:// {"metadata":{"emulator":{"name":"firestore"},"message":"\nAPI endpoint: http://"}}
+[debug] [2026-04-20T02:02:38.287Z] 127.0.0.1:8080
+Database Edition: STANDARD
+Database Mode: CLOUD_FIRESTORE
+
+If you are using a library that supports the FIRESTORE_EMULATOR_HOST environment variable, run:
+
+   export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
+
+If you are running a Firestore in Datastore Mode project, run:
+
+   export DATASTORE_EMULATOR_HOST=127.0.0.1:8080
+
+Note: Support for Datastore Mode is in preview. If you encounter any bugs please file at https://github.com/firebase/firebase-tools/issues.
+Dev App Server is now running.
+
+ {"metadata":{"emulator":{"name":"firestore"},"message":"127.0.0.1:8080\nDatabase Edition: STANDARD\nDatabase Mode: CLOUD_FIRESTORE\n\nIf you are using a library that supports the FIRESTORE_EMULATOR_HOST environment variable, run:\r\n\n   export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080\n\nIf you are running a Firestore in Datastore Mode project, run:\r\n\n   export DATASTORE_EMULATOR_HOST=127.0.0.1:8080\n\nNote: Support for Datastore Mode is in preview. If you encounter any bugs please file at https://github.com/firebase/firebase-tools/issues.\r\nDev App Server is now running.\n\r\n"}}
+[info] +  firestore: Firestore Emulator UI websocket is running on 9150. {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator UI websocket is running on 9150."}}
+[debug] [2026-04-20T02:02:43.102Z] Ignoring unsupported arg: port {"metadata":{"emulator":{"name":"storage"},"message":"Ignoring unsupported arg: port"}}
+[warn] !  Unexpected rules runtime error: WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::arrayBaseOffset has been called by com.google.protobuf.UnsafeUtil$MemoryAccessor (file:/C:/Users/senre/.cache/firebase/emulators/cloud-storage-rules-runtime-v1.1.3.jar)
+WARNING: Please consider reporting this to the maintainers of class com.google.protobuf.UnsafeUtil$MemoryAccessor
+WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release
+ {"metadata":{"emulator":{"name":"storage"},"message":"Unexpected rules runtime error: WARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::arrayBaseOffset has been called by com.google.protobuf.UnsafeUtil$MemoryAccessor (file:/C:/Users/senre/.cache/firebase/emulators/cloud-storage-rules-runtime-v1.1.3.jar)\nWARNING: Please consider reporting this to the maintainers of class com.google.protobuf.UnsafeUtil$MemoryAccessor\nWARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release\r\n"}}
+[debug] [2026-04-20T02:02:43.823Z] Temp file directory for storage emulator: C:\Users\senre\AppData\Local\Temp/firebase/storage/blobs {"metadata":{"emulator":{"name":"storage"},"message":"Temp file directory for storage emulator: C:\\Users\\senre\\AppData\\Local\\Temp/firebase/storage/blobs"}}
+[debug] [2026-04-20T02:02:43.832Z] [Extensions] Connecting Extensions emulator, this is a noop.
+[info] i  functions: Watching "C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions" for Cloud Functions... {"metadata":{"emulator":{"name":"functions"},"message":"Watching \"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\" for Cloud Functions..."}}
+[debug] [2026-04-20T02:02:43.834Z] Validating nodejs source
+[warn] !  functions: package.json indicates an outdated version of firebase-functions. Please upgrade using npm install --save firebase-functions@latest in your functions directory. 
+[warn] !  functions: Please note that there will be breaking changes when you upgrade. 
+[debug] [2026-04-20T02:02:44.919Z] > [functions] package.json contents: {
+  "name": "pnaa-functions",
+  "version": "1.0.0",
+  "description": "PNAA Cloud Functions for Wild Apricot sync",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "sync": "npm run build && node lib/run-sync.js",
+    "sync:members": "npm run build && node lib/run-sync.js members",
+    "sync:events": "npm run build && node lib/run-sync.js events"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.3.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.35",
+    "typescript": "^5.7.0"
+  },
+  "private": true
+}
+[debug] [2026-04-20T02:02:44.920Z] Building nodejs source
+[debug] [2026-04-20T02:02:44.920Z] Failed to find version of module node: reached end of search path C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\node_modules
+[warn] !  functions: Your requested "node" version "20" doesn't match your global version "22". Using node@22 from host. 
+[info] i  functions: Loaded environment variables from .env.local. 
+[debug] [2026-04-20T02:02:44.925Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-04-20T02:02:44.934Z] Found firebase-functions binary at 'C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\node_modules\.bin\firebase-functions'
+[info] Serving at port 8545
+
+[debug] [2026-04-20T02:02:45.869Z] Got response from /__/functions.yaml {"endpoints":{"syncMembers":{"availableMemoryMb":null,"timeoutSeconds":540,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"syncMembers"},"syncEvents":{"availableMemoryMb":null,"timeoutSeconds":300,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"syncEvents"},"updateMembers":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"scheduleTrigger":{"schedule":"every day 02:00","retryConfig":{},"timeZone":"America/New_York"},"entryPoint":"updateMembers"},"createUser":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"callableTrigger":{},"entryPoint":"createUser"},"wildApricotWebhook":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"wildApricotWebhook"}},"specVersion":"v1alpha1","requiredAPIs":[{"api":"cloudscheduler.googleapis.com","reason":"Needed for scheduled functions."}],"extensions":{},"params":[{"name":"WILD_APRICOT_API_KEY","type":"string"},{"name":"WILD_APRICOT_ACCOUNT_ID","type":"string"},{"name":"WEBHOOK_SECRET","type":"string"}]}
+[debug] [2026-04-20T02:02:49.915Z] defaultcredentials: writing to file C:\Users\senre\AppData\Roaming\firebase\nsen_terpmail_umd.edu_application_default_credentials.json
+[debug] [2026-04-20T02:02:49.915Z] Setting GAC to C:\Users\senre\AppData\Roaming\firebase\nsen_terpmail_umd.edu_application_default_credentials.json {"metadata":{"emulator":{"name":"functions"},"message":"Setting GAC to C:\\Users\\senre\\AppData\\Roaming\\firebase\\nsen_terpmail_umd.edu_application_default_credentials.json"}}
+[info] +  functions: Loaded functions definitions from source: syncMembers, syncEvents, updateMembers, createUser, wildApricotWebhook. {"metadata":{"emulator":{"name":"functions"},"message":"Loaded functions definitions from source: syncMembers, syncEvents, updateMembers, createUser, wildApricotWebhook."}}
+[info] +  functions[us-central1-syncMembers]: http function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/syncMembers). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/syncMembers)."}}
+[info] +  functions[us-central1-syncEvents]: http function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/syncEvents). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/syncEvents)."}}
+[info] i  functions[us-central1-updateMembers]: function ignored because the pubsub emulator does not exist or is not running. {"metadata":{"emulator":{"name":"functions"},"message":"function ignored because the pubsub emulator does not exist or is not running."}}
+[info] +  functions[us-central1-createUser]: http function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/createUser). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/createUser)."}}
+[info] +  functions[us-central1-wildApricotWebhook]: http function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/wildApricotWebhook). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/pnaa-chapter-management/us-central1/wildApricotWebhook)."}}
+[debug] [2026-04-20T02:02:49.924Z] Could not find VSCode notification endpoint: FetchError: request to http://localhost:40001/vscode/notify failed, reason: . If you are not running the Firebase Data Connect VSCode extension, this is expected and not an issue.
+[info] 
+┌─────────────────────────────────────────────────────────────┐
+│ ✔  All emulators ready! It is now safe to connect your app. │
+│ i  View Emulator UI at http://127.0.0.1:4000/               │
+└─────────────────────────────────────────────────────────────┘
+
+┌────────────────┬────────────────┬──────────────────────────────────┐
+│ Emulator       │ Host:Port      │ View in Emulator UI              │
+├────────────────┼────────────────┼──────────────────────────────────┤
+│ Authentication │ 127.0.0.1:9099 │ http://127.0.0.1:4000/auth       │
+├────────────────┼────────────────┼──────────────────────────────────┤
+│ Functions      │ 127.0.0.1:5001 │ http://127.0.0.1:4000/functions  │
+├────────────────┼────────────────┼──────────────────────────────────┤
+│ Firestore      │ 127.0.0.1:8080 │ http://127.0.0.1:4000/firestore  │
+├────────────────┼────────────────┼──────────────────────────────────┤
+│ Storage        │ 127.0.0.1:9199 │ http://127.0.0.1:4000/storage    │
+├────────────────┼────────────────┼──────────────────────────────────┤
+│ Extensions     │ 127.0.0.1:5001 │ http://127.0.0.1:4000/extensions │
+└────────────────┴────────────────┴──────────────────────────────────┘
+  Emulator Hub host: 127.0.0.1 port: 4400
+  Other reserved ports: 4500, 9150
+┌─────────────────────────┬───────────────┬─────────────────────┐
+│ Extension Instance Name │ Extension Ref │ View in Emulator UI │
+└─────────────────────────┴───────────────┴─────────────────────┘
+Issues? Report them at https://github.com/firebase/firebase-tools/issues and attach the *-debug.log files.
+ 
+[debug] [2026-04-20T02:03:25.795Z] Apr 19, 2026 10:03:25 PM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketChannelHandler initChannel
+INFO: Connected to new websocket client
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 19, 2026 10:03:25 PM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketChannelHandler initChannel\r\nINFO: Connected to new websocket client\r\n"}}
+[debug] [2026-04-20T02:07:18.209Z] [work-queue] {"queuedWork":["/pnaa-chapter-management/us-central1/syncEvents-2026-04-20T02:07:18.208Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-04-20T02:07:18.209Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/pnaa-chapter-management/us-central1/syncEvents-2026-04-20T02:07:18.208Z"],"workRunningCount":1}
+[debug] [2026-04-20T02:07:18.210Z] Accepted request POST /pnaa-chapter-management/us-central1/syncEvents?key=j6kpeadtn8y44jnpioxgrsfh4p4rb4 --> us-central1-syncEvents
+[debug] [2026-04-20T02:07:18.216Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-04-20T02:07:18.217Z] [functions] Got req.url=/pnaa-chapter-management/us-central1/syncEvents?key=j6kpeadtn8y44jnpioxgrsfh4p4rb4, mapping to path=/?key=j6kpeadtn8y44jnpioxgrsfh4p4rb4 {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/pnaa-chapter-management/us-central1/syncEvents?key=j6kpeadtn8y44jnpioxgrsfh4p4rb4, mapping to path=/?key=j6kpeadtn8y44jnpioxgrsfh4p4rb4"}}
+[info] i  functions: Loaded environment variables from .env.local. 
+[debug] [2026-04-20T02:07:18.244Z] [worker-pool] addWorker(us-central1-syncEvents) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] addWorker(us-central1-syncEvents)"}}
+[debug] [2026-04-20T02:07:18.245Z] [worker-pool] Adding worker with key us-central1-syncEvents, total=1 {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] Adding worker with key us-central1-syncEvents, total=1"}}
+[debug] [2026-04-20T02:07:19.549Z] [runtime-status] [44616] Resolved module firebase-admin {"declared":true,"installed":true,"version":"13.7.0","resolution":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\node_modules\\firebase-admin\\lib\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Resolved module firebase-admin {\"declared\":true,\"installed\":true,\"version\":\"13.7.0\",\"resolution\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\\\\node_modules\\\\firebase-admin\\\\lib\\\\index.js\"}"}}
+[debug] [2026-04-20T02:07:19.551Z] [runtime-status] [44616] Resolved module firebase-functions {"declared":true,"installed":true,"version":"6.6.0","resolution":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\node_modules\\firebase-functions\\lib\\v2\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Resolved module firebase-functions {\"declared\":true,\"installed\":true,\"version\":\"6.6.0\",\"resolution\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\\\\node_modules\\\\firebase-functions\\\\lib\\\\v2\\\\index.js\"}"}}
+[debug] [2026-04-20T02:07:19.552Z] [runtime-status] [44616] Outgoing network have been stubbed. [{"name":"http","status":"mocked"},{"name":"http","status":"mocked"},{"name":"https","status":"mocked"},{"name":"https","status":"mocked"},{"name":"net","status":"mocked"}] {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Outgoing network have been stubbed. [{\"name\":\"http\",\"status\":\"mocked\"},{\"name\":\"http\",\"status\":\"mocked\"},{\"name\":\"https\",\"status\":\"mocked\"},{\"name\":\"https\",\"status\":\"mocked\"},{\"name\":\"net\",\"status\":\"mocked\"}]"}}
+[debug] [2026-04-20T02:07:19.552Z] [runtime-status] [44616] Resolved module firebase-functions {"declared":true,"installed":true,"version":"6.6.0","resolution":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\node_modules\\firebase-functions\\lib\\v2\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Resolved module firebase-functions {\"declared\":true,\"installed\":true,\"version\":\"6.6.0\",\"resolution\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\\\\node_modules\\\\firebase-functions\\\\lib\\\\v2\\\\index.js\"}"}}
+[debug] [2026-04-20T02:07:19.872Z] [runtime-status] [44616] Resolved module firebase-admin {"declared":true,"installed":true,"version":"13.7.0","resolution":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\node_modules\\firebase-admin\\lib\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Resolved module firebase-admin {\"declared\":true,\"installed\":true,\"version\":\"13.7.0\",\"resolution\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\\\\node_modules\\\\firebase-admin\\\\lib\\\\index.js\"}"}}
+[debug] [2026-04-20T02:07:19.875Z] [runtime-status] [44616] Resolved module firebase-functions {"declared":true,"installed":true,"version":"6.6.0","resolution":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\node_modules\\firebase-functions\\lib\\v2\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Resolved module firebase-functions {\"declared\":true,\"installed\":true,\"version\":\"6.6.0\",\"resolution\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\\\\node_modules\\\\firebase-functions\\\\lib\\\\v2\\\\index.js\"}"}}
+[debug] [2026-04-20T02:07:20.113Z] [runtime-status] [44616] firebase-admin has been stubbed. {"adminResolution":{"declared":true,"installed":true,"version":"13.7.0","resolution":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\node_modules\\firebase-admin\\lib\\index.js"}} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] firebase-admin has been stubbed. {\"adminResolution\":{\"declared\":true,\"installed\":true,\"version\":\"13.7.0\",\"resolution\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\\\\node_modules\\\\firebase-admin\\\\lib\\\\index.js\"}}"}}
+[debug] [2026-04-20T02:07:20.126Z] [runtime-status] [44616] Functions runtime initialized. {"cwd":"C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions","node_version":"22.16.0"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Functions runtime initialized. {\"cwd\":\"C:\\\\Users\\\\senre\\\\OneDrive\\\\Desktop\\\\Code\\\\H4I\\\\new-philippine-nurses-association-of-america\\\\functions\",\"node_version\":\"22.16.0\"}"}}
+[debug] [2026-04-20T02:07:20.126Z] [runtime-status] [44616] Listening to port: \\?\pipe\fire_emu_1fc609c2272c72bf {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[runtime-status] [44616] Listening to port: \\\\?\\pipe\\fire_emu_1fc609c2272c72bf"}}
+[debug] [2026-04-20T02:07:20.221Z] [worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: IDLE"}}
+[debug] [2026-04-20T02:07:20.222Z] [worker-pool] submitRequest(triggerId=us-central1-syncEvents) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-syncEvents)"}}
+[info] i  functions: Beginning execution of "us-central1-syncEvents" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"Beginning execution of \"us-central1-syncEvents\""}}
+[debug] [2026-04-20T02:07:20.224Z] [worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: BUSY"}}
+[debug] [2026-04-20T02:07:21.775Z] Apr 19, 2026 10:07:21 PM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead
+INFO: Detected HTTP/2 connection.
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 19, 2026 10:07:21 PM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead\r\nINFO: Detected HTTP/2 connection.\r\n"}}
+[info] >  syncEvents: 275 new events added, 0 skipped (already exist) {"user":"syncEvents: 275 new events added, 0 skipped (already exist)","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"\u001b[90m> \u001b[39m syncEvents: 275 new events added, 0 skipped (already exist)"}}
+[debug] [2026-04-20T02:08:10.264Z] File C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\lib\webhook-handler.js.map changed, reloading triggers {"metadata":{"emulator":{"name":"functions"},"message":"File C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\lib\\webhook-handler.js.map changed, reloading triggers"}}
+[debug] [2026-04-20T02:08:10.279Z] File C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\lib\wa-utils.js.map changed, reloading triggers {"metadata":{"emulator":{"name":"functions"},"message":"File C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\lib\\wa-utils.js.map changed, reloading triggers"}}
+[debug] [2026-04-20T02:08:10.330Z] File C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\lib\sync-events.js.map changed, reloading triggers {"metadata":{"emulator":{"name":"functions"},"message":"File C:\\Users\\senre\\OneDrive\\Desktop\\Code\\H4I\\new-philippine-nurses-association-of-america\\functions\\lib\\sync-events.js.map changed, reloading triggers"}}
+[debug] [2026-04-20T02:08:11.346Z] Validating nodejs source
+[warn] !  functions: package.json indicates an outdated version of firebase-functions. Please upgrade using npm install --save firebase-functions@latest in your functions directory. 
+[warn] !  functions: Please note that there will be breaking changes when you upgrade. 
+[debug] [2026-04-20T02:08:12.314Z] > [functions] package.json contents: {
+  "name": "pnaa-functions",
+  "version": "1.0.0",
+  "description": "PNAA Cloud Functions for Wild Apricot sync",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "sync": "npm run build && node lib/run-sync.js",
+    "sync:members": "npm run build && node lib/run-sync.js members",
+    "sync:events": "npm run build && node lib/run-sync.js events"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.3.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.35",
+    "typescript": "^5.7.0"
+  },
+  "private": true
+}
+[debug] [2026-04-20T02:08:12.314Z] Building nodejs source
+[debug] [2026-04-20T02:08:12.314Z] Failed to find version of module node: reached end of search path C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\node_modules
+[warn] !  functions: Your requested "node" version "20" doesn't match your global version "22". Using node@22 from host. 
+[info] i  functions: Loaded environment variables from .env.local. 
+[debug] [2026-04-20T02:08:12.317Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-04-20T02:08:12.326Z] Found firebase-functions binary at 'C:\Users\senre\OneDrive\Desktop\Code\H4I\new-philippine-nurses-association-of-america\functions\node_modules\.bin\firebase-functions'
+[info] Serving at port 8668
+
+[debug] [2026-04-20T02:08:12.833Z] Got response from /__/functions.yaml {"endpoints":{"syncMembers":{"availableMemoryMb":null,"timeoutSeconds":540,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"syncMembers"},"syncEvents":{"availableMemoryMb":null,"timeoutSeconds":300,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"syncEvents"},"updateMembers":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"scheduleTrigger":{"schedule":"every day 02:00","retryConfig":{},"timeZone":"America/New_York"},"entryPoint":"updateMembers"},"createUser":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"callableTrigger":{},"entryPoint":"createUser"},"wildApricotWebhook":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"wildApricotWebhook"}},"specVersion":"v1alpha1","requiredAPIs":[{"api":"cloudscheduler.googleapis.com","reason":"Needed for scheduled functions."}],"extensions":{},"params":[{"name":"WILD_APRICOT_API_KEY","type":"string"},{"name":"WILD_APRICOT_ACCOUNT_ID","type":"string"},{"name":"WEBHOOK_SECRET","type":"string"}]}
+[debug] [2026-04-20T02:08:16.865Z] defaultcredentials: writing to file C:\Users\senre\AppData\Roaming\firebase\nsen_terpmail_umd.edu_application_default_credentials.json
+[debug] [2026-04-20T02:08:16.866Z] Setting GAC to C:\Users\senre\AppData\Roaming\firebase\nsen_terpmail_umd.edu_application_default_credentials.json {"metadata":{"emulator":{"name":"functions"},"message":"Setting GAC to C:\\Users\\senre\\AppData\\Roaming\\firebase\\nsen_terpmail_umd.edu_application_default_credentials.json"}}
+[info] +  functions: Loaded functions definitions from source: syncMembers, syncEvents, updateMembers, createUser, wildApricotWebhook. {"metadata":{"emulator":{"name":"functions"},"message":"Loaded functions definitions from source: syncMembers, syncEvents, updateMembers, createUser, wildApricotWebhook."}}
+[debug] [2026-04-20T02:08:16.868Z] [worker-pool] Marking BUSY worker to finish (us-central1-syncEvents) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] Marking BUSY worker to finish (us-central1-syncEvents)"}}
+[debug] [2026-04-20T02:08:16.869Z] [worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: FINISHING {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: FINISHING"}}
+[info] >  syncEvents: 275 new events added, 0 skipped; registrations: 9199, incomplete: 242; writes: 9199 added, 0 updated, 0 deleted {"user":"syncEvents: 275 new events added, 0 skipped; registrations: 9199, incomplete: 242; writes: 9199 added, 0 updated, 0 deleted","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"\u001b[90m> \u001b[39m syncEvents: 275 new events added, 0 skipped; registrations: 9199, incomplete: 242; writes: 9199 added, 0 updated, 0 deleted"}}
+[debug] [2026-04-20T02:09:02.497Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-syncEvents" in 102269.8048ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"Finished \"us-central1-syncEvents\" in 102269.8048ms"}}
+[debug] [2026-04-20T02:09:02.499Z] [worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: IDLE --> FINISHING {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: IDLE --> FINISHING"}}
+[debug] [2026-04-20T02:09:02.499Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-04-20T02:09:02.500Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-04-20T02:09:02.500Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-04-20T02:09:02.506Z] Apr 19, 2026 10:09:02 PM io.netty.channel.DefaultChannelPipeline onUnhandledInboundException
+WARNING: An exceptionCaught() event was fired, and it reached at the tail of the pipeline. It usually means the last handler in the pipeline did not handle the exception.
+java.net.SocketException: Connection reset
+	at java.base/sun.nio.ch.SocketChannelImpl.throwConnectionReset(SocketChannelImpl.java:399)
+	at java.base/sun.nio.ch.SocketChannelImpl.implRead(SocketChannelImpl.java:431)
+	at java.base/sun.nio.ch.SocketChannelImpl.read(SocketChannelImpl.java:489)
+	at io.netty.buffer.PooledByteBuf.setBytes(PooledByteBuf.java:255)
+	at io.netty.buffer.AbstractByteBuf.writeBytes(AbstractByteBuf.java:1132)
+	at io.netty.channel.socket.nio.NioSocketChannel.doReadBytes(NioSocketChannel.java:356)
+	at io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe.read(AbstractNioByteChannel.java:151)
+	at io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:796)
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:732)
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:658)
+	at io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:562)
+	at io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:998)
+	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
+	at io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 19, 2026 10:09:02 PM io.netty.channel.DefaultChannelPipeline onUnhandledInboundException\r\nWARNING: An exceptionCaught() event was fired, and it reached at the tail of the pipeline. It usually means the last handler in the pipeline did not handle the exception.\r\njava.net.SocketException: Connection reset\r\n\tat java.base/sun.nio.ch.SocketChannelImpl.throwConnectionReset(SocketChannelImpl.java:399)\r\n\tat java.base/sun.nio.ch.SocketChannelImpl.implRead(SocketChannelImpl.java:431)\r\n\tat java.base/sun.nio.ch.SocketChannelImpl.read(SocketChannelImpl.java:489)\r\n\tat io.netty.buffer.PooledByteBuf.setBytes(PooledByteBuf.java:255)\r\n\tat io.netty.buffer.AbstractByteBuf.writeBytes(AbstractByteBuf.java:1132)\r\n\tat io.netty.channel.socket.nio.NioSocketChannel.doReadBytes(NioSocketChannel.java:356)\r\n\tat io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe.read(AbstractNioByteChannel.java:151)\r\n\tat io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:796)\r\n\tat io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:732)\r\n\tat io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:658)\r\n\tat io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:562)\r\n\tat io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:998)\r\n\tat io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)\r\n\tat io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30)\r\n\tat java.base/java.lang.Thread.run(Thread.java:1474)\r\n\r\n"}}
+[debug] [2026-04-20T02:09:02.517Z] [worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: exited {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: exited"}}
+[debug] [2026-04-20T02:09:02.517Z] [worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: FINISHED {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-syncEvents"},"extension":{},"message":"[worker-us-central1-syncEvents-44285068-2251-48ac-80d5-543e0cba4d29]: FINISHED"}}

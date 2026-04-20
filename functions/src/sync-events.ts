@@ -1,7 +1,7 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { defineString } from "firebase-functions/params";
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
-import { getWAToken, getWAAccountId } from "./wa-utils";
+import { getWAToken, getWAAccountId, AttendeeData} from "./wa-utils";
 
 const WEBHOOK_SECRET = defineString("WEBHOOK_SECRET");
 
@@ -137,23 +137,6 @@ export const syncEvents = onRequest(
     console.log(`syncEvents: ${added} new events added, ${skipped} skipped (already exist)`);
 
     //ATTENDEE FETCHING: 
-
-    // Fields used for diffing attendee docs 
-    // Matches Attendee data in typescript, but defined here as a plain type for easy runtime access
-    type AttendeeData = {
-      registrationId: string;
-      eventId: string;
-      contactId: string;
-      name: string;
-      registrationTypeId: string;
-      registrationType: string;
-      organization: string;
-      isPaid: boolean;
-      registrationFee: number;
-      paidSum: number;
-      OnWaitlist: boolean;
-      Status: string;
-    };
 
     // the list of fields to check for changes & update accordingly
     const FIELDS_TO_COMPARE: (keyof AttendeeData)[] = [
@@ -346,7 +329,6 @@ export const syncEvents = onRequest(
     // - was an attempt to avoid the ECONNRESET error thrown 
 
     const CHUNK_SIZE = 3;
-    for (let i = 0; i < allWAEvents.length; i += CHUNK_SIZE) {
     for (let i = 0; i < allWAEvents.length; i += CHUNK_SIZE) {
       const chunk = allWAEvents.slice(i, i + CHUNK_SIZE);
       const results = await Promise.allSettled(chunk.map(processEvent));

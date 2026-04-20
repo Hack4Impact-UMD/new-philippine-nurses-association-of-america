@@ -161,6 +161,20 @@ export async function fetchWAEvent(
  // Used by the webhook handler for per-event attendee sync.
  // Returns [] on 404 or empty response to indicate no registrations.
 
+ export type AttendeeData = {
+      registrationId: string;
+      eventId: string;
+      contactId: string;
+      name: string;
+      registrationTypeId: string;
+      registrationType: string;
+      organization: string;
+      isPaid: boolean;
+      registrationFee: number;
+      paidSum: number;
+      OnWaitlist: boolean;
+      Status: string;
+    };
 //  "Parameters":
 //  {    
 //   "Action":"Created",

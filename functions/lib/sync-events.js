@@ -113,6 +113,7 @@ exports.syncEvents = (0, https_1.onRequest)({ timeoutSeconds: 300 }, async (req,
         await batch.commit();
     }
     console.log(`syncEvents: ${added} new events added, ${skipped} skipped (already exist)`);
+    //ATTENDEE FETCHING: 
     // the list of fields to check for changes & update accordingly
     const FIELDS_TO_COMPARE = [
         "registrationId", "eventId", "contactId", "name",
@@ -142,10 +143,12 @@ exports.syncEvents = (0, https_1.onRequest)({ timeoutSeconds: 300 }, async (req,
             const regResponse = await fetch(regUrl, {
                 headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
             });
-            // if no registrations, skip to next event.
             if (!regResponse.ok) {
-                console.error(`Registrations fetch failed for event ${eventId} at skip=${regSkip}: ${regResponse.statusText}`);
-                return { added: 0, updated: 0, deleted: 0, registrations: 0, incomplete: 0 };
+                // WA returns 404 for events with no registrations - treat as empty
+                if (regResponse.status === 404) {
+                    break;
+                }
+                throw new Error(`Registrations fetch failed for event ${eventId} at skip=${regSkip}: ${regResponse.status} ${regResponse.statusText}`);
             }
             // Successful response - registrations exist, and added to the allRegistrations array
             const regData = await regResponse.json();
@@ -180,7 +183,7 @@ exports.syncEvents = (0, https_1.onRequest)({ timeoutSeconds: 300 }, async (req,
                 registrationId,
                 eventId: String(regEvent.Id ?? ""),
                 contactId,
-                name: String(reg.DisplayName ?? ""),
+                name: String(reg.DisplayName ?? contact.Name ?? ""),
                 registrationTypeId: String(regType.Id ?? ""),
                 registrationType: String(regType.Name ?? ""),
                 organization: String(reg.Organization ?? ""),
@@ -191,76 +194,109 @@ exports.syncEvents = (0, https_1.onRequest)({ timeoutSeconds: 300 }, async (req,
                 Status: status,
             });
         }
-        // Read existing attendees from Firestore
-        const attendeeSnap = await eventRef.collection("attendees").get();
-        const attendeeMap = new Map();
-        for (const doc of attendeeSnap.docs)
-            attendeeMap.set(doc.id, doc.data());
-        // Build and commit this event's batch
-        let eventBatch = db.batch();
-        let eventBatchCount = 0;
-        let added = 0;
-        let updated = 0;
-        let deleted = 0;
-        const commitIfFull = async () => {
-            if (eventBatchCount >= 450) {
-                await eventBatch.commit();
-                eventBatch = db.batch();
-                eventBatchCount = 0;
+        // Acquire per-event lock to prevent webhook handler from writing
+        // attendees while sync's destructive diff is in progress.
+        const LOCK_TTL_MS = 6 * 60 * 1000; // Slightly longer than function timeout
+        const lockAcquired = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(eventRef);
+            if (!snap.exists)
+                return false;
+            const lockVal = snap.data()?.syncLock;
+            if (lockVal && firestore_1.Timestamp.now().toMillis() - lockVal.toMillis() < LOCK_TTL_MS) {
+                return false;
             }
-        };
-        // Diff attendees: add new, update changed, delete removed
-        for (const [id, incoming] of waRegs) {
-            const existing = attendeeMap.get(id);
-            if (!existing) {
-                eventBatch.set(eventRef.collection("attendees").doc(id), incoming);
-                eventBatchCount++;
-                added++;
-            }
-            else if (FIELDS_TO_COMPARE.some((f) => incoming[f] !== existing[f])) {
-                eventBatch.set(eventRef.collection("attendees").doc(id), incoming);
-                eventBatchCount++;
-                updated++;
-            }
-            await commitIfFull();
+            tx.update(eventRef, { syncLock: firestore_1.Timestamp.now() });
+            return true;
+        });
+        if (!lockAcquired) {
+            console.log(`processEvent: skipping event ${eventId} — sync lock held or event missing`);
+            return { added: 0, updated: 0, deleted: 0, registrations: 0, incomplete: 0 };
         }
-        // Deletions: if an existing attendee's registrationId is not in the WA data,
-        // it means it was deleted in WA and should be deleted in Firestore
-        for (const [id] of attendeeMap) {
-            if (!waRegs.has(id)) {
-                eventBatch.delete(eventRef.collection("attendees").doc(id));
-                eventBatchCount++;
-                deleted++;
+        try {
+            // Read existing attendees from Firestore
+            const attendeeSnap = await eventRef.collection("attendees").get();
+            const attendeeMap = new Map();
+            for (const doc of attendeeSnap.docs)
+                attendeeMap.set(doc.id, doc.data());
+            // Build and commit this event's batch
+            let eventBatch = db.batch();
+            let eventBatchCount = 0;
+            let added = 0;
+            let updated = 0;
+            let deleted = 0;
+            const commitIfFull = async () => {
+                if (eventBatchCount >= 450) {
+                    await eventBatch.commit();
+                    eventBatch = db.batch();
+                    eventBatchCount = 0;
+                }
+            };
+            // Diff attendees: add new, update changed, delete removed
+            for (const [id, incoming] of waRegs) {
+                const existing = attendeeMap.get(id);
+                if (!existing) {
+                    eventBatch.set(eventRef.collection("attendees").doc(id), incoming);
+                    eventBatchCount++;
+                    added++;
+                }
+                else if (FIELDS_TO_COMPARE.some((f) => incoming[f] !== existing[f])) {
+                    eventBatch.set(eventRef.collection("attendees").doc(id), incoming);
+                    eventBatchCount++;
+                    updated++;
+                }
                 await commitIfFull();
             }
+            // Deletions: if an existing attendee's registrationId is not in the WA data,
+            // it means it was deleted in WA and should be deleted in Firestore
+            for (const [id] of attendeeMap) {
+                if (!waRegs.has(id)) {
+                    eventBatch.delete(eventRef.collection("attendees").doc(id));
+                    eventBatchCount++;
+                    deleted++;
+                    await commitIfFull();
+                }
+            }
+            // Update event-level counts and release sync lock
+            eventBatch.update(eventRef, {
+                registrations: waRegs.size,
+                attendees: waRegs.size,
+                incompleteRegistrations: eventIncomplete,
+                totalRevenue: totalRevenue,
+                syncLock: firestore_1.FieldValue.delete(),
+                lastUpdated: firestore_1.Timestamp.now(),
+                lastUpdatedUser: "WildApricot",
+            });
+            eventBatchCount++;
+            await commitIfFull();
+            if (eventBatchCount > 0)
+                await eventBatch.commit();
+            return { added, updated, deleted, registrations: waRegs.size, incomplete: eventIncomplete };
         }
-        // Update event-level counts
-        eventBatch.update(eventRef, {
-            registrations: waRegs.size,
-            attendees: waRegs.size,
-            incompleteRegistrations: eventIncomplete,
-            totalRevenue: totalRevenue,
-            lastUpdated: firestore_1.Timestamp.now(),
-            lastUpdatedUser: "WildApricot",
-        });
-        eventBatchCount++;
-        await commitIfFull();
-        if (eventBatchCount > 0)
-            await eventBatch.commit();
-        return { added, updated, deleted, registrations: waRegs.size, incomplete: eventIncomplete };
+        finally {
+            // Defensive lock release in case the batch commit failed
+            try {
+                await eventRef.update({ syncLock: firestore_1.FieldValue.delete() });
+            }
+            catch (_e) { /* lock already cleared or event doc gone */ }
+        }
     }
     // Process all events in chunks of 3 concurrently
     // - was an attempt to avoid the ECONNRESET error thrown 
     const CHUNK_SIZE = 3;
     for (let i = 0; i < allWAEvents.length; i += CHUNK_SIZE) {
         const chunk = allWAEvents.slice(i, i + CHUNK_SIZE);
-        const results = await Promise.all(chunk.map(processEvent));
+        const results = await Promise.allSettled(chunk.map(processEvent));
         for (const r of results) {
-            totalAdded += r.added;
-            totalUpdated += r.updated;
-            totalDeleted += r.deleted;
-            totalRegistrations += r.registrations;
-            totalIncomplete += r.incomplete;
+            if (r.status === "fulfilled") {
+                totalAdded += r.value.added;
+                totalUpdated += r.value.updated;
+                totalDeleted += r.value.deleted;
+                totalRegistrations += r.value.registrations;
+                totalIncomplete += r.value.incomplete;
+            }
+            else {
+                console.error(`processEvent failed: ${r.reason}`);
+            }
         }
     }
     const msg = `syncEvents: ${added} new events added, ${skipped} skipped; ` +
