@@ -522,7 +522,9 @@ async function main() {
     process.exit(1);
   }
 
-  const target = process.argv[2]; // "members" | "events" | undefined
+  // Separate flags from positional arguments so "--staging" doesn't become target
+  const positionalArgs = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  const target = positionalArgs[0]; // "members" | "events" | undefined
   const { from, limit } = parseArgs();
 
   if (from > 0 || limit < Infinity) {

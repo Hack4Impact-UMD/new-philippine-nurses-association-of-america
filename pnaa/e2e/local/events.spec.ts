@@ -17,6 +17,10 @@ import { authenticateUser, hasAuthCredentials } from "../helpers/auth";
 
 const testIfAuth = hasAuthCredentials() ? test : test.skip;
 
+// For tests that create data without cleanup - run locally only, skip in CI
+const testIfAuthLocalOnly =
+  hasAuthCredentials() && !process.env.CI ? test : test.skip;
+
 test.describe("Events - Unauthenticated", () => {
   test("redirects to signin when accessing events", async ({ page }) => {
     await page.goto("/events");
@@ -117,6 +121,7 @@ test.describe("Events - Form Validation", () => {
     const submitButton = page.locator('button[type="submit"]');
 
     if (await submitButton.isVisible()) {
+      const urlBeforeSubmit = page.url();
       await submitButton.click();
 
       // Should show validation errors
@@ -128,8 +133,10 @@ test.describe("Events - Form Validation", () => {
         .isVisible()
         .catch(() => false);
 
-      // Form should show errors or prevent submission
-      expect(true).toBeTruthy();
+      const stayedOnForm = page.url() === urlBeforeSubmit;
+
+      // Form should show errors OR prevent navigation (stay on form)
+      expect(hasErrors || stayedOnForm).toBeTruthy();
     }
   });
 
@@ -147,17 +154,32 @@ test.describe("Events - Form Validation", () => {
     const endDateInput = page.locator('input[name="endDate"], input[id="endDate"]');
 
     if (await startDateInput.isVisible() && await endDateInput.isVisible()) {
-      await startDateInput.fill("2026-05-15");
-      await endDateInput.fill("2026-05-10"); // Before start date
+      // Use dynamic dates to avoid hardcoded values aging out
+      const futureDate1 = new Date();
+      futureDate1.setDate(futureDate1.getDate() + 30);
+      const futureDate2 = new Date();
+      futureDate2.setDate(futureDate2.getDate() + 29); // Before futureDate1
+      const formatDate = (d: Date) => d.toISOString().split("T")[0];
 
+      await startDateInput.fill(formatDate(futureDate1));
+      await endDateInput.fill(formatDate(futureDate2)); // End before start
+
+      const urlBeforeSubmit = page.url();
       const submitButton = page.locator('button[type="submit"]');
       await submitButton.click();
 
       await page.waitForTimeout(500);
 
       // Should show date validation error or prevent submission
-      const pageText = await page.textContent("body");
-      // Form should not submit successfully with invalid dates
+      const hasDateError = await page
+        .locator('text=/end.*before.*start|end.*after.*start|invalid.*date/i')
+        .isVisible()
+        .catch(() => false);
+
+      const stayedOnForm = page.url() === urlBeforeSubmit;
+
+      // Form should show date error OR prevent navigation
+      expect(hasDateError || stayedOnForm).toBeTruthy();
     }
   });
 });
@@ -170,7 +192,10 @@ test.describe("Events - CRUD Operations", () => {
     }
   });
 
-  testIfAuth("can create a new event", async ({ page }) => {
+  // NOTE: This test creates real data in staging. Skipped in CI since cleanup
+  // requires Firebase Admin access. Runs locally for manual verification.
+  // Created test events should be manually archived/deleted after test runs.
+  testIfAuthLocalOnly("can create a new event", async ({ page }) => {
     await page.goto("/events/new");
 
     if (page.url().includes("/signin") || page.url().includes("/dashboard")) {
@@ -183,32 +208,36 @@ test.describe("Events - CRUD Operations", () => {
     // Fill out the form
     const nameInput = page.locator('input[name="name"], input[id="name"]');
     if (await nameInput.isVisible()) {
-      const testEventName = `Test Event ${Date.now()}`;
+      const testEventName = `E2E Test Event ${Date.now()}`;
+
+      // Use dynamic future dates (30 and 31 days from now)
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() + 30);
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 31);
+      const formatDate = (d: Date) => d.toISOString().split("T")[0];
 
       await nameInput.fill(testEventName);
-
-      // Fill other required fields
-      await page.locator('input[name="startDate"]').fill("2026-06-01");
-      await page.locator('input[name="endDate"]').fill("2026-06-02");
+      await page.locator('input[name="startDate"]').fill(formatDate(startDate));
+      await page.locator('input[name="endDate"]').fill(formatDate(endDate));
 
       // Fill location if required
       const locationInput = page.locator('input[name="location"]');
       if (await locationInput.isVisible()) {
-        await locationInput.fill("Test Location");
+        await locationInput.fill("E2E Test Location");
       }
 
       // Submit
       await page.locator('button[type="submit"]').click();
 
-      // Should redirect to events list or show success
-      await page.waitForTimeout(2000);
+      // Wait for navigation or success message
+      await page.waitForURL(/\/events/, { timeout: 10000 }).catch(() => {});
 
-      // Either redirected or shows success message
-      const success =
-        page.url().includes("/events") ||
-        (await page.getByText(/success|created/i).isVisible().catch(() => false));
+      // Assert: Either redirected to events list or shows success message
+      const redirectedToList = page.url().includes("/events") && !page.url().includes("/new");
+      const showsSuccess = await page.getByText(/success|created/i).isVisible().catch(() => false);
 
-      expect(true).toBeTruthy(); // Visual verification needed
+      expect(redirectedToList || showsSuccess).toBeTruthy();
     }
   });
 

@@ -15,7 +15,7 @@ export function ChapterCard({
 }) {
   return (
     <Link href={`/chapters/${chapter.id}`}>
-      <Card className="transition-all hover:shadow-md hover:border-primary/20">
+      <Card data-testid="chapter-card" className="transition-all hover:shadow-md hover:border-primary/20">
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">

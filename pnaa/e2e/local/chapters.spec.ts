@@ -67,7 +67,7 @@ test.describe("Chapters - Authenticated", () => {
     if (await tableToggle.isVisible()) {
       await cardToggle.click();
       // After clicking card, should show cards
-      await expect(page.locator('[data-testid="chapter-card"]').first()).toBeVisible({ timeout: 5000 }).catch(() => {});
+      await expect(page.locator('[data-testid="chapter-card"]').first()).toBeVisible({ timeout: 5000 });
 
       await tableToggle.click();
       // After clicking table, should show table
@@ -123,11 +123,15 @@ test.describe("Chapters - Authenticated", () => {
     await page.goto("/chapters");
     await page.waitForLoadState("networkidle");
 
-    // Click on first chapter link/row
-    const chapterLink = page.locator("table tbody tr a, [data-testid='chapter-card'] a").first();
+    // Click on first chapter - table row uses onRowClick, card is wrapped in Link
+    const tableRow = page.locator("table tbody tr").first();
+    const chapterCard = page.locator('[data-testid="chapter-card"]').first();
 
-    if (await chapterLink.isVisible()) {
-      await chapterLink.click();
+    if (await tableRow.isVisible()) {
+      await tableRow.click();
+      await expect(page).toHaveURL(/\/chapters\/[a-zA-Z0-9-]+/);
+    } else if (await chapterCard.isVisible()) {
+      await chapterCard.click();
       await expect(page).toHaveURL(/\/chapters\/[a-zA-Z0-9-]+/);
     }
   });
@@ -136,11 +140,20 @@ test.describe("Chapters - Authenticated", () => {
     await page.goto("/chapters");
     await page.waitForLoadState("networkidle");
 
-    // Navigate to first chapter
-    const chapterLink = page.locator("table tbody tr").first().locator("a").first();
+    // Navigate to first chapter - table row uses onRowClick, card is wrapped in Link
+    const tableRow = page.locator("table tbody tr").first();
+    const chapterCard = page.locator('[data-testid="chapter-card"]').first();
 
-    if (await chapterLink.isVisible()) {
-      await chapterLink.click();
+    let navigated = false;
+    if (await tableRow.isVisible()) {
+      await tableRow.click();
+      navigated = true;
+    } else if (await chapterCard.isVisible()) {
+      await chapterCard.click();
+      navigated = true;
+    }
+
+    if (navigated) {
       await page.waitForLoadState("networkidle");
 
       // Should show member statistics
@@ -172,15 +185,23 @@ test.describe("Chapters - Pagination", () => {
     const nextButton = page.locator('button:has-text("Next"), button[aria-label*="next" i]');
     const pageNumbers = page.locator('[data-testid^="page-"], button:has-text(/^[0-9]+$/)');
 
-    // At least one pagination element should be visible if there's enough data
-    const hasPagination =
-      (await pagination.isVisible().catch(() => false)) ||
-      (await nextButton.isVisible().catch(() => false)) ||
-      (await pageNumbers.first().isVisible().catch(() => false));
+    // Check if pagination controls exist
+    const hasPaginationNav = await pagination.isVisible().catch(() => false);
+    const hasNextButton = await nextButton.isVisible().catch(() => false);
+    const hasPageNumbers = await pageNumbers.first().isVisible().catch(() => false);
+    const hasPagination = hasPaginationNav || hasNextButton || hasPageNumbers;
 
-    // Pagination may not be visible if there's not enough data
-    // This test passes if pagination exists OR if there's few items
-    expect(true).toBeTruthy(); // Always pass - visual verification
+    // Check row count to determine if pagination should exist
+    const rowCount = await page.locator("table tbody tr").count();
+
+    // Skip if not enough data for pagination (less than default page size)
+    if (rowCount < 20 && !hasPagination) {
+      test.skip(true, "Not enough data for pagination");
+      return;
+    }
+
+    // If we have enough data, pagination should be visible
+    expect(hasPagination).toBeTruthy();
   });
 
   testIfAuth("can navigate between pages", async ({ page }) => {
@@ -188,15 +209,26 @@ test.describe("Chapters - Pagination", () => {
     await page.waitForLoadState("networkidle");
 
     const nextButton = page.locator('button:has-text("Next"), button[aria-label*="next" i]').first();
+    const hasNextButton = await nextButton.isVisible().catch(() => false);
+    const isEnabled = hasNextButton && await nextButton.isEnabled().catch(() => false);
 
-    if (await nextButton.isVisible() && await nextButton.isEnabled()) {
-      const initialContent = await page.locator("table tbody tr").first().textContent();
-      await nextButton.click();
-      await page.waitForTimeout(500);
-
-      // Content should have changed
-      const newContent = await page.locator("table tbody tr").first().textContent();
-      // May or may not be different depending on data
+    // Skip if pagination is not available
+    if (!hasNextButton || !isEnabled) {
+      test.skip(true, "Next button not visible or not enabled - not enough data for pagination");
+      return;
     }
+
+    // Get initial content before navigation
+    const initialContent = await page.locator("table tbody tr").first().textContent();
+
+    await nextButton.click();
+    await page.waitForTimeout(500);
+
+    // After clicking next, content should change OR button should become disabled (last page)
+    const newContent = await page.locator("table tbody tr").first().textContent();
+    const buttonNowDisabled = !(await nextButton.isEnabled().catch(() => true));
+    const contentChanged = newContent !== initialContent;
+
+    expect(contentChanged || buttonNowDisabled).toBeTruthy();
   });
 });

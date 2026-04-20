@@ -20,11 +20,15 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { AuthProvider, useAuthContext } from "@/lib/auth/context";
 
 // Track the auth state callback so we can trigger auth changes
-let authStateCallback: ((user: any) => void) | null = null;
+type MockFirebaseUser = { uid: string; email?: string } | null;
+let authStateCallback: ((user: MockFirebaseUser) => void) | null = null;
 
 // Mock Firebase Auth
 jest.mock("firebase/auth", () => ({
-  onAuthStateChanged: (auth: any, callback: (user: any) => void) => {
+  onAuthStateChanged: (
+    _auth: unknown,
+    callback: (user: MockFirebaseUser) => void
+  ) => {
     authStateCallback = callback;
     // Return unsubscribe function
     return () => {
@@ -38,8 +42,10 @@ jest.mock("firebase/auth", () => ({
 // Mock Firestore
 const mockGetDoc = jest.fn();
 jest.mock("firebase/firestore", () => ({
-  doc: jest.fn((db, collection, id) => ({ path: `${collection}/${id}` })),
-  getDoc: (...args: any[]) => mockGetDoc(...args),
+  doc: jest.fn((_db: unknown, collection: string, id: string) => ({
+    path: `${collection}/${id}`,
+  })),
+  getDoc: (...args: unknown[]) => mockGetDoc(...args),
 }));
 
 // Mock Firebase config

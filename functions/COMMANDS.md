@@ -38,7 +38,7 @@ firebase deploy --only functions:syncMembers,functions:syncEvents
 
 The sync scripts fetch data from **Wild Apricot** (read-only) and write to **Firestore**.
 
-```
+```text
 Wild Apricot (source) ──READ──► Sync Script ──WRITE──► Firestore (staging OR production)
 ```
 

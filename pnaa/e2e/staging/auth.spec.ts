@@ -127,17 +127,15 @@ test.describe("Session Management", () => {
 
     // Try to access protected route
     await page.goto("/dashboard");
-    await page.waitForLoadState("domcontentloaded");
 
-    // Should redirect to signin due to invalid token
-    // Note: This depends on server-side token verification
-    const currentUrl = page.url();
+    // Wait for redirect to signin (invalid token should trigger redirect)
+    // Allow time for client-side auth check and redirect
+    await page.waitForURL(/\/signin/, { timeout: 10000 }).catch(() => {
+      // If no redirect, check current state
+    });
 
-    // Either shows error or redirects
-    expect(
-      currentUrl.includes("/signin") ||
-        currentUrl.includes("/dashboard") // May show dashboard then redirect
-    ).toBeTruthy();
+    // Should have redirected to signin due to invalid token
+    await expect(page).toHaveURL(/\/signin/);
   });
 
   test("accessing protected route without cookie redirects", async ({
@@ -205,10 +203,10 @@ test.describe("CSRF Protection", () => {
   });
 
   test("OAuth state must match cookie", async ({ page, context }) => {
-    // Set a state cookie
+    // Set a state cookie (must match name used in callback/route.ts)
     await context.addCookies([
       {
-        name: "oauth_state",
+        name: "wa_oauth_state",
         value: "correct-state-value",
         domain: "localhost",
         path: "/",

@@ -5,18 +5,20 @@
  * running against the STAGING Firebase environment.
  *
  * Setup Instructions:
- * 1. Create a test user in staging via Wild Apricot
- * 2. Set environment variables:
- *    - TEST_USER_EMAIL: Test user's email
- *    - TEST_USER_PASSWORD: Test user's password (if using direct auth)
- *    - Or use a pre-authenticated session cookie
+ * 1. Log in to the staging app manually in a browser
+ * 2. Copy the `firebase_token` cookie value from DevTools
+ * 3. Set the environment variable:
+ *    TEST_SESSION_COOKIE=<your-firebase-token-value>
+ *
+ * The cookie is validated server-side by the app's middleware.
+ * Cookie expires after ~1 hour, so refresh before long test sessions.
  *
  * Usage in tests:
  * ```typescript
- * import { authenticateUser, AUTH_STORAGE_STATE } from '../helpers/auth';
+ * import { authenticateUser, hasAuthCredentials } from '../helpers/auth';
  *
  * test.beforeEach(async ({ page }) => {
- *   await authenticateUser(page, 'national_admin');
+ *   await authenticateUser(page);
  * });
  * ```
  */
@@ -26,44 +28,25 @@ import { Page, BrowserContext } from "@playwright/test";
 // Path to store authenticated session state
 export const AUTH_STORAGE_STATE = "e2e/.auth/user.json";
 
-// Test user credentials (set via environment variables)
-export const TEST_USERS = {
-  national_admin: {
-    email: process.env.TEST_NATIONAL_ADMIN_EMAIL || "",
-    // For manual testing, you can set a session cookie directly
-  },
-  chapter_admin: {
-    email: process.env.TEST_CHAPTER_ADMIN_EMAIL || "",
-  },
-  member: {
-    email: process.env.TEST_MEMBER_EMAIL || "",
-  },
-};
-
 /**
- * Check if authentication credentials are configured
+ * Check if authentication credentials are configured.
+ * Returns true only if TEST_SESSION_COOKIE is set, since that's
+ * what authenticateUser() actually uses.
  */
 export function hasAuthCredentials(): boolean {
-  return !!(
-    process.env.TEST_NATIONAL_ADMIN_EMAIL ||
-    process.env.TEST_SESSION_COOKIE
-  );
+  return !!process.env.TEST_SESSION_COOKIE;
 }
 
 /**
- * Authenticate a user by setting session cookies
+ * Authenticate a user by setting the Firebase session cookie.
  *
- * For staging tests, you have two options:
- * 1. Manual: Log in via browser, export cookies, set TEST_SESSION_COOKIE
- * 2. Automated: Use Firebase Admin SDK to create a custom token
+ * The cookie is validated server-side by the app's middleware,
+ * which then establishes the Firebase auth session.
  *
  * @param page - Playwright page
- * @param role - User role to authenticate as
+ * @returns true if authentication was set up, false if no credentials available
  */
-export async function authenticateUser(
-  page: Page,
-  role: "national_admin" | "chapter_admin" | "member" = "national_admin"
-): Promise<boolean> {
+export async function authenticateUser(page: Page): Promise<boolean> {
   const sessionCookie = process.env.TEST_SESSION_COOKIE;
 
   if (!sessionCookie) {
@@ -74,7 +57,7 @@ export async function authenticateUser(
     return false;
   }
 
-  // Set the Firebase session cookie
+  // Set the Firebase session cookie - validated server-side by middleware
   await page.context().addCookies([
     {
       name: "firebase_token",

@@ -78,9 +78,5 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     // Wait up to 2 minutes for server to start
     timeout: 120 * 1000,
-    // Environment variables for the web server
-    env: {
-      NODE_ENV: "test",
-    },
   },
 });
