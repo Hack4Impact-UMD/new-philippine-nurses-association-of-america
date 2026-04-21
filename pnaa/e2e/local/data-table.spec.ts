@@ -186,7 +186,7 @@ test.describe("Data Table - Pagination", () => {
       await page.waitForTimeout(500);
 
       // Content should have changed OR button became disabled (last page)
-      const newText = await firstRow.textContent().catch(() => "");
+      const newText = (await firstRow.textContent().catch(() => "")) ?? "";
       const buttonDisabled = !(await nextButton.isEnabled());
       const contentChanged = newText !== initialText;
 
