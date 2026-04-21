@@ -65,11 +65,10 @@ async function fetchAllWAContacts(accountId) {
     // Step 3: Paginate through results using ResultUrl with $top/$skip
     const PAGE_SIZE = 100;
     const allContacts = [];
-    let skip = 0;
+    let skip = 14900;
     const baseUrl = resultUrl || initUrl;
     while (true) {
         const separator = baseUrl.includes("?") ? "&" : "?";
-        //https://api.wildapricot.org/v2.1/accounts/213319/Contacts/?$async=false&$filter=Archived eq false&$skip=14900&$top=100
         const pageUrl = `${baseUrl}${separator}$skip=${skip}&$top=${PAGE_SIZE}`;
         console.log(`syncMembers: fetching page skip=${skip}`);
         const pageResponse = await fetch(pageUrl, { headers: await authHeaders() });
@@ -90,10 +89,6 @@ async function fetchAllWAContacts(accountId) {
         skip += contacts.length;
         if (contacts.length < PAGE_SIZE)
             break; // last page
-        // if (allContacts.length >= MAX_CONTACTS) {
-        //   console.log(`syncMembers: hit MAX_CONTACTS cap (${MAX_CONTACTS})`);
-        //   break;
-        // }
     }
     console.log(`syncMembers: fetched ${allContacts.length} total contacts`);
     return allContacts;

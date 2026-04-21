@@ -87,9 +87,7 @@ async function fetchAllWAContacts(
 
   while (true) {
     const separator = baseUrl.includes("?") ? "&" : "?";
-    //https://api.wildapricot.org/v2.1/accounts/213319/Contacts/?$async=false&$filter=Archived eq false&$skip=14900&$top=100
     const pageUrl = `${baseUrl}${separator}$skip=${skip}&$top=${PAGE_SIZE}`;
-    console.log(`syncMembers: fetching page skip=${skip}`);
     const pageResponse = await fetch(pageUrl, { headers: await authHeaders() });
     if (!pageResponse.ok) {
       console.error(
@@ -105,19 +103,12 @@ async function fetchAllWAContacts(
       contacts[contacts.length - 1]
         ? (contacts[contacts.length - 1].Id as unknown)
         : undefined;
-    console.log(
-      `syncMembers: page skip=${skip} returned ${contacts.length} contacts firstId=${firstId} lastId=${lastId}`
-    );
     if (contacts.length === 0) break;
 
     allContacts.push(...contacts);
     skip += contacts.length;
 
     if (contacts.length < PAGE_SIZE) break; // last page
-    // if (allContacts.length >= MAX_CONTACTS) {
-    //   console.log(`syncMembers: hit MAX_CONTACTS cap (${MAX_CONTACTS})`);
-    //   break;
-    // }
   }
 
   console.log(`syncMembers: fetched ${allContacts.length} total contacts`);
