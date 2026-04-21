@@ -22,17 +22,28 @@ function sleep(ms: number) {
  * 3. Paginate through the completed result using $top/$skip on the ResultUrl.
  */
 async function fetchAllWAContacts(
-  accessToken: string,
   accountId: string
 ): Promise<Record<string, unknown>[]> {
-  const authHeaders = {
-    Authorization: `Bearer ${accessToken}`,
-    Accept: "application/json",
+  // WA tokens expire after ~30 min. Refresh before that to survive long syncs.
+  const TOKEN_TTL_MS = 25 * 60 * 1000;
+  let accessToken = await getWAToken();
+  let tokenAcquiredAt = Date.now();
+
+  const authHeaders = async () => {
+    if (Date.now() - tokenAcquiredAt > TOKEN_TTL_MS) {
+      console.log("syncMembers: refreshing WA token");
+      accessToken = await getWAToken();
+      tokenAcquiredAt = Date.now();
+    }
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    };
   };
 
   // Step 1: Initiate the contacts request
-  const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts`;
-  const initResponse = await fetch(initUrl, { headers: authHeaders });
+  const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$filter=Archived eq false`;
+  const initResponse = await fetch(initUrl, { headers: await authHeaders() });
   if (!initResponse.ok) {
     throw new Error(`WA contacts request failed: ${initResponse.statusText}`);
   }
@@ -45,12 +56,18 @@ async function fetchAllWAContacts(
     console.log("syncMembers: waiting for WA contacts job...");
     for (let attempt = 0; attempt < 96; attempt++) {
       await sleep(5000);
-      const pollResponse = await fetch(resultUrl, { headers: authHeaders });
+      const pollResponse = await fetch(resultUrl, { headers: await authHeaders() });
       if (!pollResponse.ok) {
         throw new Error(`WA contacts poll failed: ${pollResponse.statusText}`);
       }
       data = (await pollResponse.json()) as Record<string, unknown>;
-      if (data.State === "Complete") break;
+      if (data.State === "Complete") {
+        const embedded = (data.Contacts as unknown[]) || [];
+        console.log(
+          `syncMembers: poll complete keys=${Object.keys(data).join(",")} embeddedContacts=${embedded.length}`
+        );
+        break;
+      }
     }
     if (data.State !== "Complete") {
       throw new Error(
@@ -70,9 +87,10 @@ async function fetchAllWAContacts(
 
   while (true) {
     const separator = baseUrl.includes("?") ? "&" : "?";
-    const pageUrl = `${baseUrl}${separator}$top=${PAGE_SIZE}&$skip=${skip}`;
-
-    const pageResponse = await fetch(pageUrl, { headers: authHeaders });
+    //https://api.wildapricot.org/v2.1/accounts/213319/Contacts/?$async=false&$filter=Archived eq false&$skip=14900&$top=100
+    const pageUrl = `${baseUrl}${separator}$skip=${skip}&$top=${PAGE_SIZE}`;
+    console.log(`syncMembers: fetching page skip=${skip}`);
+    const pageResponse = await fetch(pageUrl, { headers: await authHeaders() });
     if (!pageResponse.ok) {
       console.error(
         `WA contacts page failed at skip=${skip}: ${pageResponse.statusText}`
@@ -82,14 +100,27 @@ async function fetchAllWAContacts(
 
     const pageData = (await pageResponse.json()) as Record<string, unknown>;
     const contacts = (pageData.Contacts as Record<string, unknown>[]) || [];
+    const firstId = contacts[0] ? (contacts[0].Id as unknown) : undefined;
+    const lastId =
+      contacts[contacts.length - 1]
+        ? (contacts[contacts.length - 1].Id as unknown)
+        : undefined;
+    console.log(
+      `syncMembers: page skip=${skip} returned ${contacts.length} contacts firstId=${firstId} lastId=${lastId}`
+    );
     if (contacts.length === 0) break;
 
     allContacts.push(...contacts);
     skip += contacts.length;
 
     if (contacts.length < PAGE_SIZE) break; // last page
+    // if (allContacts.length >= MAX_CONTACTS) {
+    //   console.log(`syncMembers: hit MAX_CONTACTS cap (${MAX_CONTACTS})`);
+    //   break;
+    // }
   }
 
+  console.log(`syncMembers: fetched ${allContacts.length} total contacts`);
   return allContacts;
 }
 
@@ -97,7 +128,7 @@ async function fetchAllWAContacts(
 // Real-time updates are handled by the wildApricotWebhook function.
 // Call with: POST /syncMembers?key=[WEBHOOK_SECRET]
 export const syncMembers = onRequest(
-  { timeoutSeconds: 540 },
+  { timeoutSeconds: 3600},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -111,11 +142,10 @@ export const syncMembers = onRequest(
     }
 
     const db = getFirestore();
-    const accessToken = await getWAToken();
     const accountId = getWAAccountId();
     const now = new Date();
 
-    const rawContacts = await fetchAllWAContacts(accessToken, accountId);
+    const rawContacts = await fetchAllWAContacts(accountId);
     const allMembers: MemberData[] = [];
 
     for (const contact of rawContacts) {
@@ -130,11 +160,20 @@ export const syncMembers = onRequest(
 
     for (const memberData of allMembers) {
       const docRef = db.collection("members").doc(memberData.memberId);
+      
+      //updates chapter name to Member-at-Large if the chapter name is blank/null
+      // and the membership level is "Member-at-Large (1 year)"
+      if ((memberData.chapterName == "" || memberData.chapterName == null)
+         && memberData.membershipLevel == "Member-at-Large (1 year)") {
+        memberData.chapterName = "PNA Member-at-Large";
+      }
+      
       batch.set(docRef, memberData, { merge: true });
       batchCount++;
       processed++;
 
       if (batchCount === 450) {
+        console.log(`syncMembers: committing member batch at processed=${processed}`);
         await batch.commit();
         batch = db.batch();
         batchCount = 0;
@@ -142,8 +181,10 @@ export const syncMembers = onRequest(
     }
 
     if (batchCount > 0) {
+      console.log(`syncMembers: committing final member batch (${batchCount})`);
       await batch.commit();
     }
+    console.log(`syncMembers: all ${processed} members written to Firestore`);
 
     // Aggregate chapters from the in-memory member list (most efficient for a full sync)
     const chapterCounts: Record<
@@ -166,6 +207,9 @@ export const syncMembers = onRequest(
           totalLapsed: 0,
           region: member.region,
         };
+        if (member.chapterName == "PNA Member-at-Large") {
+          chapterCounts[member.chapterName] = {... chapterCounts[member.chapterName], region: ""};
+        }
       }
 
       chapterCounts[member.chapterName].totalMembers++;
@@ -180,7 +224,11 @@ export const syncMembers = onRequest(
     }
 
     // Fetch existing chapters to zero out any that lost all members
+    console.log("syncMembers: fetching existing chapters");
     const existingChaptersSnapshot = await db.collection("chapters").get();
+    console.log(
+      `syncMembers: ${existingChaptersSnapshot.size} existing chapters loaded`
+    );
 
     const chapterBatch = db.batch();
 
@@ -212,7 +260,9 @@ export const syncMembers = onRequest(
       );
     }
 
+    console.log("syncMembers: committing chapter batch");
     await chapterBatch.commit();
+    console.log("syncMembers: chapter batch committed");
 
     const msg =
       `syncMembers: processed ${processed} contacts, ` +
