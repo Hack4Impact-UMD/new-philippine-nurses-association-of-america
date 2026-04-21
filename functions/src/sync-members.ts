@@ -67,6 +67,7 @@ async function fetchAllWAContacts(
   // Step 3: Paginate through results using ResultUrl with $top/$skip
   const PAGE_SIZE = 100;
   const allContacts: Record<string, unknown>[] = [];
+
   let skip = 0;
   const baseUrl = resultUrl || initUrl;
 
@@ -84,11 +85,6 @@ async function fetchAllWAContacts(
 
     const pageData = (await pageResponse.json()) as Record<string, unknown>;
     const contacts = (pageData.Contacts as Record<string, unknown>[]) || [];
-    const firstId = contacts[0] ? (contacts[0].Id as unknown) : undefined;
-    const lastId =
-      contacts[contacts.length - 1]
-        ? (contacts[contacts.length - 1].Id as unknown)
-        : undefined;
     if (contacts.length === 0) break;
 
     allContacts.push(...contacts);
@@ -234,7 +230,7 @@ export const syncMembers = onRequest(
     
     const msg =
       `syncMembers: processed ${processed} contacts, ` +
-      `updated ${Object.keys(chapterCounts).length} chapters `;
+      `updated ${Object.keys(chapterCounts).length} chapters `S;
     console.log(msg);
     res.status(200).send(msg);
   }
