@@ -11,12 +11,10 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
+  const token = searchParams.get("token");
+
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (!token) {
-      setError("No authentication token provided");
-      return;
-    }
+    if (!token) return;
 
     signInWithCustomToken(auth, token)
       .then(async (userCredential) => {
@@ -48,13 +46,15 @@ function CallbackContent() {
         console.error("Firebase sign-in error:", err);
         setError("Authentication failed. Please try again.");
       });
-  }, [searchParams, router]);
+  }, [token, router]);
 
-  if (error) {
+  const displayError = !token ? "No authentication token provided" : error;
+
+  if (displayError) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center space-y-4">
-          <p className="text-destructive">{error}</p>
+          <p className="text-destructive">{displayError}</p>
           <a href="/signin" className="text-primary underline">
             Return to sign in
           </a>

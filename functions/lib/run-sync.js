@@ -1,15 +1,29 @@
 "use strict";
 /**
- * Local runner — syncs members, chapters, and events directly to production Firestore.
+ * Local runner — syncs members, chapters, and events to Firestore.
+ *
+ * By default, syncs to PRODUCTION. Use --staging flag to sync to staging instead.
  *
  * Usage (from functions/ directory):
- *   npm run sync                          # sync everything
- *   npm run sync:members                  # sync all members + chapters
- *   npm run sync:events                   # sync all events
  *
- *   node lib/run-sync.js members --from 5000          # start at contact #5000
- *   node lib/run-sync.js members --from 5000 --limit 3000  # process 3000 contacts starting at #5000
- *   node lib/run-sync.js members --limit 1000         # process only the first 1000 contacts
+ *   PRODUCTION (default):
+ *     npm run sync                          # sync everything to production
+ *     npm run sync:members                  # sync members to production
+ *     npm run sync:events                   # sync events to production
+ *
+ *   STAGING (safe for testing):
+ *     npm run sync:staging                  # sync everything to staging
+ *     npm run sync:staging:members          # sync members to staging
+ *     npm run sync:staging:events           # sync events to staging
+ *
+ *   With flags:
+ *     npm run sync:staging:members -- --limit 5000        # first 5000 contacts
+ *     npm run sync:staging:members -- --from 5000         # skip first 5000
+ *     npm run sync:staging:members -- --from 5000 --limit 3000  # contacts 5000-7999
+ *
+ * Data flow: Wild Apricot (READ) → Firestore (WRITE)
+ * - Wild Apricot is the source, never modified
+ * - Only ONE Firestore project is written to per run (staging OR production)
  *
  * Chapters are always aggregated from ALL members already in Firestore,
  * so partial runs still produce accurate chapter counts.
@@ -54,8 +68,22 @@ const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
 // Load WA credentials from functions/.env
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
-// Initialize Admin SDK with the production service account
-const serviceAccount = require(path.resolve(__dirname, "../../pnaa-chapter-management-firebase-adminsdk-fbsvc-fc1a5f5216.json"));
+// ─── Environment Selection ───────────────────────────────────────────────────
+// Check for --staging flag to determine which Firebase project to write to
+const useStaging = process.argv.includes("--staging");
+const SERVICE_ACCOUNT_PATHS = {
+    production: "../../pnaa-chapter-management-firebase-adminsdk-fbsvc-fc1a5f5216.json",
+    staging: "../../pnaa-chaptermanagement-staging-firebase-adminsdk-fbsvc-6513a32ac9.json",
+};
+const serviceAccountPath = useStaging
+    ? SERVICE_ACCOUNT_PATHS.staging
+    : SERVICE_ACCOUNT_PATHS.production;
+const serviceAccountRaw = require(path.resolve(__dirname, serviceAccountPath));
+const serviceAccount = serviceAccountRaw;
+// Log which environment we're targeting (important for visibility)
+const targetEnv = useStaging ? "STAGING" : "PRODUCTION";
+console.log(`\n🎯 Target environment: ${targetEnv}`);
+console.log(`   Project: ${serviceAccountRaw.project_id}\n`);
 (0, app_1.initializeApp)({ credential: (0, app_1.cert)(serviceAccount) });
 const db = (0, firestore_1.getFirestore)();
 const WA_API_KEY = process.env.WILD_APRICOT_API_KEY;

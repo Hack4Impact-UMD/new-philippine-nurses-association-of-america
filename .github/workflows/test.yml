@@ -1,0 +1,236 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, automated-testing]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================
+  # Unit & Integration Tests (Jest)
+  # ============================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pnaa
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pnaa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test -- --coverage --ci
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: pnaa/coverage/
+          retention-days: 7
+
+  # ============================================
+  # Lint & Type Check
+  # ============================================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pnaa
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pnaa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+  # ============================================
+  # Build Check (ensures app compiles)
+  # ============================================
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pnaa
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pnaa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create minimal env for build
+        run: |
+          cat > .env.local << 'EOF'
+          NEXT_PUBLIC_FIREBASE_API_KEY=test
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=test.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID=test
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=test.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
+          NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abc123
+          NEXT_PUBLIC_APP_URL=http://localhost:3000
+          EOF
+
+      - name: Build application
+        run: npm run build
+
+  # ============================================
+  # E2E Tests (Playwright) - Local/Smoke Tests
+  # ============================================
+  e2e-smoke:
+    name: E2E Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests, lint]
+    defaults:
+      run:
+        working-directory: pnaa
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pnaa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Create staging env for E2E
+        run: |
+          # Minimal config for E2E - tests will skip authenticated tests
+          cat > .env.staging.local << 'EOF'
+          NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.STAGING_FIREBASE_API_KEY || 'test' }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ secrets.STAGING_FIREBASE_AUTH_DOMAIN || 'test.firebaseapp.com' }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ secrets.STAGING_FIREBASE_PROJECT_ID || 'test' }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ secrets.STAGING_FIREBASE_STORAGE_BUCKET || 'test.appspot.com' }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.STAGING_FIREBASE_MESSAGING_SENDER_ID || '123456789' }}
+          NEXT_PUBLIC_FIREBASE_APP_ID=${{ secrets.STAGING_FIREBASE_APP_ID || '1:123456789:web:abc' }}
+          NEXT_PUBLIC_APP_URL=http://localhost:3000
+          EOF
+
+      - name: Run E2E smoke tests (unauthenticated only)
+        run: npm run test:e2e -- --grep "@smoke|Unauthenticated|signin" --project=chromium
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: pnaa/playwright-report/
+          retention-days: 7
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: pnaa/test-results/
+          retention-days: 7
+
+  # ============================================
+  # E2E Tests - Full (with staging auth)
+  # Only runs when secrets are configured
+  # ============================================
+  e2e-full:
+    name: E2E Full Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: [e2e-smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      HAS_STAGING_SECRETS: ${{ secrets.STAGING_FIREBASE_API_KEY != '' }}
+    defaults:
+      run:
+        working-directory: pnaa
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pnaa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Create staging env with secrets
+        if: env.HAS_STAGING_SECRETS == 'true'
+        run: |
+          cat > .env.staging.local << 'EOF'
+          NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.STAGING_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ secrets.STAGING_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ secrets.STAGING_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ secrets.STAGING_FIREBASE_STORAGE_BUCKET }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.STAGING_FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID=${{ secrets.STAGING_FIREBASE_APP_ID }}
+          NEXT_PUBLIC_APP_URL=http://localhost:3000
+          EOF
+
+      - name: Run full E2E tests
+        if: env.HAS_STAGING_SECRETS == 'true'
+        env:
+          TEST_SESSION_COOKIE: ${{ secrets.TEST_SESSION_COOKIE }}
+        run: |
+          npm run test:e2e
+          npm run test:e2e:staging
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-full
+          path: pnaa/playwright-report/
+          retention-days: 14

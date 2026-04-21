@@ -122,10 +122,16 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
   );
 
   // All chapter names to query (main + aliases)
-  const allChapterNames = useMemo(() => {
-    if (!chapter?.name) return [];
-    return [chapter.name, ...(aliases as AliasRow[]).map((a) => a.aliasName)];
-  }, [chapter?.name, aliases]);
+  // Wrapped in useMemo so the array reference is stable across renders,
+  // preventing memberConstraints / eventConstraints / fundraisingConstraints
+  // from recomputing (and re-subscribing) unless chapter or aliases actually change.
+  const allChapterNames = useMemo(
+    () =>
+      chapter?.name
+        ? [chapter.name, ...(aliases as AliasRow[]).map((a) => a.aliasName)]
+        : [],
+    [chapter, aliases]
+  );
 
   const hasAliases = (aliases as AliasRow[]).length > 0;
 

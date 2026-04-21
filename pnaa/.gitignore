@@ -13,6 +13,11 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
+/e2e/.auth
+TESTING_PLAN.md
+AUTOMATED_TESTING_IMPLEMENTATION.md
 
 # next.js
 /.next/
