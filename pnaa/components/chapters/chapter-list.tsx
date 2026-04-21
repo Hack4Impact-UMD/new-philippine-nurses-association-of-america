@@ -19,6 +19,7 @@ import { Building2, GitMerge } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
 import type { Chapter } from "@/types/chapter";
 import type { ChapterAlias } from "@/types/chapter-alias";
+import { ChapterActivityChart } from "./chapter-activity-chart";
 
 type ChapterRow = Chapter & { id: string };
 
@@ -239,6 +240,8 @@ export function ChapterList() {
         </div>
         <ViewToggle view={view} onViewChange={handleViewChange} />
       </div>
+
+      <ChapterActivityChart chapters={mergedChapters as ChapterRow[]} loading={loading} />
 
       {view === "table" ? (
         <AdvancedDataTable<ChapterRow>
