@@ -22,28 +22,17 @@ function sleep(ms: number) {
  * 3. Paginate through the completed result using $top/$skip on the ResultUrl.
  */
 async function fetchAllWAContacts(
+  accessToken: string,
   accountId: string
 ): Promise<Record<string, unknown>[]> {
-  // WA tokens expire after ~30 min. Refresh before that to survive long syncs.
-  const TOKEN_TTL_MS = 25 * 60 * 1000;
-  let accessToken = await getWAToken();
-  let tokenAcquiredAt = Date.now();
-
-  const authHeaders = async () => {
-    if (Date.now() - tokenAcquiredAt > TOKEN_TTL_MS) {
-      console.log("syncMembers: refreshing WA token");
-      accessToken = await getWAToken();
-      tokenAcquiredAt = Date.now();
-    }
-    return {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    };
+ const authHeaders = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
   };
 
   // Step 1: Initiate the contacts request
   const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$filter=Archived eq false`;
-  const initResponse = await fetch(initUrl, { headers: await authHeaders() });
+  const initResponse = await fetch(initUrl, { headers:  authHeaders });
   if (!initResponse.ok) {
     throw new Error(`WA contacts request failed: ${initResponse.statusText}`);
   }
@@ -56,7 +45,7 @@ async function fetchAllWAContacts(
     console.log("syncMembers: waiting for WA contacts job...");
     for (let attempt = 0; attempt < 96; attempt++) {
       await sleep(5000);
-      const pollResponse = await fetch(resultUrl, { headers: await authHeaders() });
+      const pollResponse = await fetch(resultUrl, { headers:  authHeaders });
       if (!pollResponse.ok) {
         throw new Error(`WA contacts poll failed: ${pollResponse.statusText}`);
       }
@@ -88,7 +77,7 @@ async function fetchAllWAContacts(
   while (true) {
     const separator = baseUrl.includes("?") ? "&" : "?";
     const pageUrl = `${baseUrl}${separator}$skip=${skip}&$top=${PAGE_SIZE}`;
-    const pageResponse = await fetch(pageUrl, { headers: await authHeaders() });
+    const pageResponse = await fetch(pageUrl, { headers:  authHeaders });
     if (!pageResponse.ok) {
       console.error(
         `WA contacts page failed at skip=${skip}: ${pageResponse.statusText}`
@@ -119,7 +108,7 @@ async function fetchAllWAContacts(
 // Real-time updates are handled by the wildApricotWebhook function.
 // Call with: POST /syncMembers?key=[WEBHOOK_SECRET]
 export const syncMembers = onRequest(
-  { timeoutSeconds: 3600},
+  { timeoutSeconds: 720},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -132,11 +121,14 @@ export const syncMembers = onRequest(
       return;
     }
 
+    const startMs = Date.now();
+
     const db = getFirestore();
+    const accessToken = await getWAToken();
     const accountId = getWAAccountId();
     const now = new Date();
 
-    const rawContacts = await fetchAllWAContacts(accountId);
+    const rawContacts = await fetchAllWAContacts(accessToken, accountId);
     const allMembers: MemberData[] = [];
 
     for (const contact of rawContacts) {
@@ -255,9 +247,11 @@ export const syncMembers = onRequest(
     await chapterBatch.commit();
     console.log("syncMembers: chapter batch committed");
 
+    const elapsedSeconds = ((Date.now() - startMs) / 1000).toFixed(2);
     const msg =
       `syncMembers: processed ${processed} contacts, ` +
-      `updated ${Object.keys(chapterCounts).length} chapters`;
+      `updated ${Object.keys(chapterCounts).length} chapters ` +
+      `in ${elapsedSeconds}s`;
     console.log(msg);
     res.status(200).send(msg);
   }
