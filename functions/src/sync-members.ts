@@ -51,10 +51,6 @@ async function fetchAllWAContacts(
       }
       data = (await pollResponse.json()) as Record<string, unknown>;
       if (data.State === "Complete") {
-        const embedded = (data.Contacts as unknown[]) || [];
-        console.log(
-          `syncMembers: poll complete keys=${Object.keys(data).join(",")} embeddedContacts=${embedded.length}`
-        );
         break;
       }
     }
@@ -77,6 +73,7 @@ async function fetchAllWAContacts(
   while (true) {
     const separator = baseUrl.includes("?") ? "&" : "?";
     const pageUrl = `${baseUrl}${separator}$skip=${skip}&$top=${PAGE_SIZE}`;
+    
     const pageResponse = await fetch(pageUrl, { headers:  authHeaders });
     if (!pageResponse.ok) {
       console.error(
@@ -100,7 +97,6 @@ async function fetchAllWAContacts(
     if (contacts.length < PAGE_SIZE) break; // last page
   }
 
-  console.log(`syncMembers: fetched ${allContacts.length} total contacts`);
   return allContacts;
 }
 
@@ -120,8 +116,6 @@ export const syncMembers = onRequest(
       res.status(401).send("Unauthorized");
       return;
     }
-
-    const startMs = Date.now();
 
     const db = getFirestore();
     const accessToken = await getWAToken();
@@ -156,7 +150,6 @@ export const syncMembers = onRequest(
       processed++;
 
       if (batchCount === 450) {
-        console.log(`syncMembers: committing member batch at processed=${processed}`);
         await batch.commit();
         batch = db.batch();
         batchCount = 0;
@@ -164,10 +157,8 @@ export const syncMembers = onRequest(
     }
 
     if (batchCount > 0) {
-      console.log(`syncMembers: committing final member batch (${batchCount})`);
       await batch.commit();
     }
-    console.log(`syncMembers: all ${processed} members written to Firestore`);
 
     // Aggregate chapters from the in-memory member list (most efficient for a full sync)
     const chapterCounts: Record<
@@ -207,11 +198,7 @@ export const syncMembers = onRequest(
     }
 
     // Fetch existing chapters to zero out any that lost all members
-    console.log("syncMembers: fetching existing chapters");
     const existingChaptersSnapshot = await db.collection("chapters").get();
-    console.log(
-      `syncMembers: ${existingChaptersSnapshot.size} existing chapters loaded`
-    );
 
     const chapterBatch = db.batch();
 
@@ -243,15 +230,11 @@ export const syncMembers = onRequest(
       );
     }
 
-    console.log("syncMembers: committing chapter batch");
     await chapterBatch.commit();
-    console.log("syncMembers: chapter batch committed");
-
-    const elapsedSeconds = ((Date.now() - startMs) / 1000).toFixed(2);
+    
     const msg =
       `syncMembers: processed ${processed} contacts, ` +
-      `updated ${Object.keys(chapterCounts).length} chapters ` +
-      `in ${elapsedSeconds}s`;
+      `updated ${Object.keys(chapterCounts).length} chapters `;
     console.log(msg);
     res.status(200).send(msg);
   }
