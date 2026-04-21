@@ -307,19 +307,23 @@ test.describe("Fundraising - CRUD Operations", () => {
     await page.goto("/fundraising");
     await page.waitForLoadState("networkidle");
 
-    // Filter to test data to avoid archiving real campaigns
+    // Filter to test data rows — hard-skip if search is unavailable to avoid
+    // accidentally targeting real campaigns.
     const searchInput = page.locator('input[placeholder*="search" i]').first();
-    if (await searchInput.isVisible()) {
-      await searchInput.fill(TEST_DATA_PREFIX);
-      await page.waitForTimeout(500);
+    if (!(await searchInput.isVisible())) {
+      test.skip();
+      return;
     }
+    await searchInput.fill(TEST_DATA_PREFIX);
+    await page.waitForTimeout(500);
 
     // Get row count after filtering to test data
     const tableRows = page.locator("table tbody tr");
     const initialCount = await tableRows.count();
 
-    // Find an archive/delete button
-    const archiveButton = page
+    // Scope the archive button to rows that contain TEST_DATA_PREFIX only
+    const testDataRow = page.locator("table tbody tr").filter({ hasText: TEST_DATA_PREFIX }).first();
+    const archiveButton = testDataRow
       .locator('button:has-text("Archive"), button:has-text("Delete"), button[aria-label*="archive" i]')
       .first();
 

@@ -19,6 +19,14 @@ export function useDocument<T>(
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
+    // Reset stale state immediately on every docId transition (including → undefined)
+    // so consumers never see data/error from a previous document.
+    // All three calls are batched by React 18 and are intentional here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setData(null);
+    setError(null);
+    setLoading(Boolean(docId));
+
     if (!docId) return;
 
     const docRef = doc(db, collectionName, docId);
@@ -42,7 +50,7 @@ export function useDocument<T>(
     return () => unsubscribe();
   }, [collectionName, docId]);
 
-  return { data, loading: docId ? loading : false, error };
+  return { data, loading, error };
 }
 
 export function useCollection<T>(

@@ -75,7 +75,10 @@ test.describe("Data Table - Column Sorting", () => {
     const header = page.locator("th").filter({ hasText: /name/i }).first();
 
     if (await header.isVisible()) {
-      // Click three times to cycle through asc -> desc -> none
+      // Capture unsorted state before any clicks
+      const initialRow = await page.locator("table tbody tr").first().textContent().catch(() => "");
+
+      // Cycle: first click (ascending), second click (descending), third click (removes sort)
       await header.click();
       await page.waitForTimeout(200);
       await header.click();
@@ -83,9 +86,9 @@ test.describe("Data Table - Column Sorting", () => {
       await header.click();
       await page.waitForTimeout(200);
 
-      // After third click, sort should be removed or cycled
-      const hasSortIcon = await header.locator('button svg').count() > 0;
-      expect(hasSortIcon).toBeTruthy();
+      // After third click the sort is removed — row order must be back to initial
+      const finalRow = await page.locator("table tbody tr").first().textContent().catch(() => "");
+      expect(finalRow).toBe(initialRow);
     }
   });
 });
@@ -179,7 +182,7 @@ test.describe("Data Table - Pagination", () => {
     if (await nextButton.isVisible() && await nextButton.isEnabled()) {
       // Store first row content
       const firstRow = page.locator("table tbody tr").first();
-      const initialText = await firstRow.textContent().catch(() => "");
+      const initialText = (await firstRow.textContent().catch(() => "")) ?? "";
 
       // Click next
       await nextButton.click();
@@ -190,7 +193,7 @@ test.describe("Data Table - Pagination", () => {
       const buttonDisabled = !(await nextButton.isEnabled());
       const contentChanged = newText !== initialText;
 
-      expect(contentChanged || buttonDisabled || newText.length > 0).toBeTruthy();
+      expect(contentChanged || buttonDisabled).toBeTruthy();
     }
   });
 
@@ -320,9 +323,6 @@ test.describe("Data Table - Filtering", () => {
     const searchInput = page.locator('input[placeholder*="search" i]').first();
 
     if (await searchInput.isVisible()) {
-      // Get initial count before any filtering
-      const initialCount = await page.locator("table tbody tr").count();
-
       // First filter with something unlikely to match
       await searchInput.fill("xyznonexistent999");
       await page.waitForTimeout(300);
@@ -358,25 +358,27 @@ test.describe("Data Table - Column Resizing", () => {
       '[data-testid="column-resize-handle"], .resize-handle, th [class*="resize"]'
     ).first();
 
-    if (await resizeHandle.isVisible()) {
-      // Get initial column width
-      const header = page.locator("th").first();
-      const initialBox = await header.boundingBox();
+    if (!(await resizeHandle.isVisible())) {
+      // Resize handle not found — feature not yet implemented
+      test.fixme();
+      return;
+    }
 
-      if (initialBox) {
-        // Drag resize handle
-        await resizeHandle.hover();
-        await page.mouse.down();
-        await page.mouse.move(initialBox.x + initialBox.width + 50, initialBox.y);
-        await page.mouse.up();
+    // Get initial column width
+    const header = page.locator("th").first();
+    const initialBox = await header.boundingBox();
 
-        // Width should have changed
-        const newBox = await header.boundingBox();
+    if (initialBox) {
+      // Drag resize handle
+      await resizeHandle.hover();
+      await page.mouse.down();
+      await page.mouse.move(initialBox.x + initialBox.width + 50, initialBox.y);
+      await page.mouse.up();
 
-        // Verify resize occurred (width changed) or resize feature works
-        const widthChanged = newBox && newBox.width !== initialBox.width;
-        expect(widthChanged || newBox !== null).toBeTruthy();
-      }
+      // Width must have changed for resize to be working
+      const newBox = await header.boundingBox();
+      const widthChanged = newBox !== null && newBox.width !== initialBox.width;
+      expect(widthChanged).toBeTruthy();
     }
   });
 });
