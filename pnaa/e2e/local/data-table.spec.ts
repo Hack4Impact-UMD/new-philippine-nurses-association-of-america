@@ -35,17 +35,18 @@ test.describe("Data Table - Column Sorting", () => {
     const header = page.locator("th").filter({ hasText: /name/i }).first();
 
     if (await header.isVisible()) {
+      // Get row content BEFORE sort
+      const firstRowBefore = await page.locator("table tbody tr").first().textContent().catch(() => "");
+
       await header.click();
       await page.waitForTimeout(300);
 
-      // Verify sort indicator: aria-sort attribute, sort icon, or data attribute
-      const ariaSort = await header.getAttribute("aria-sort");
-      const hasAscClass = await header.locator('[class*="asc"], [data-sort="asc"], svg').isVisible().catch(() => false);
-      const headerHtml = await header.innerHTML();
-      const hasSortIndicator = ariaSort === "ascending" || hasAscClass || headerHtml.includes("asc");
+      // After clicking, verify sort icon present or row order changed
+      const hasSortIcon = await header.locator('button svg').count() > 0;
+      const firstRowAfter = await page.locator("table tbody tr").first().textContent().catch(() => "");
+      const rowOrderChanged = firstRowBefore !== firstRowAfter;
 
-      // Header should indicate sorting state changed
-      expect(hasSortIndicator || headerHtml.length > 0).toBeTruthy();
+      expect(hasSortIcon || rowOrderChanged).toBeTruthy();
     }
   });
 
@@ -56,16 +57,17 @@ test.describe("Data Table - Column Sorting", () => {
       // First click - ascending
       await header.click();
       await page.waitForTimeout(300);
+      const firstRowAfterAsc = await page.locator("table tbody tr").first().textContent().catch(() => "");
 
       // Second click - descending
       await header.click();
       await page.waitForTimeout(300);
 
-      // Verify descending indicator
-      const ariaSort = await header.getAttribute("aria-sort");
-      const hasDescClass = await header.locator('[class*="desc"], [data-sort="desc"]').isVisible().catch(() => false);
+      const firstRowAfterDesc = await page.locator("table tbody tr").first().textContent().catch(() => "");
+      const hasSortIcon = await header.locator('button svg').count() > 0;
+      const rowOrderChanged = firstRowAfterAsc !== firstRowAfterDesc;
 
-      expect(ariaSort === "descending" || hasDescClass || true).toBeTruthy();
+      expect(hasSortIcon || rowOrderChanged).toBeTruthy();
     }
   });
 
@@ -81,11 +83,9 @@ test.describe("Data Table - Column Sorting", () => {
       await header.click();
       await page.waitForTimeout(200);
 
-      // Verify sort is removed (no aria-sort or set to "none")
-      const ariaSort = await header.getAttribute("aria-sort");
-      const sortRemoved = !ariaSort || ariaSort === "none";
-
-      expect(sortRemoved || true).toBeTruthy();
+      // After third click, sort should be removed or cycled
+      const hasSortIcon = await header.locator('button svg').count() > 0;
+      expect(hasSortIcon).toBeTruthy();
     }
   });
 });
@@ -137,7 +137,7 @@ test.describe("Data Table - Column Visibility", () => {
         // Check if column visibility changed
         if (wasVisible) {
           const isNowHidden = !(await regionHeader.isVisible().catch(() => true));
-          // Column visibility should have changed
+          expect(isNowHidden).toBeTruthy();
         }
       }
     }
@@ -168,7 +168,7 @@ test.describe("Data Table - Pagination", () => {
 
     // Pass if pagination exists OR there's not enough data to paginate (single page)
     const tableRows = await page.locator("table tbody tr").count();
-    expect(paginationExists || hasPageInfo || tableRows >= 0).toBeTruthy();
+    expect(paginationExists || hasPageInfo || tableRows > 0).toBeTruthy();
   });
 
   testIfAuth("can change page", async ({ page }) => {
@@ -200,16 +200,13 @@ test.describe("Data Table - Pagination", () => {
     );
 
     if (await perPageSelect.isVisible()) {
-      // Get current row count
-      const initialCount = await page.locator("table tbody tr").count();
-
       // Change to different value
       await perPageSelect.selectOption({ index: 1 });
       await page.waitForTimeout(500);
 
       // Row count should have changed (unless data count is less than both options)
       const newCount = await page.locator("table tbody tr").count();
-      expect(newCount >= 0).toBeTruthy();
+      expect(newCount > 0).toBeTruthy();
     }
   });
 });

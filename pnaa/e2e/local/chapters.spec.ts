@@ -106,6 +106,9 @@ test.describe("Chapters - Authenticated", () => {
     const sortableHeader = page.locator('th:has-text("Total Members"), th:has-text("Members")');
 
     if (await sortableHeader.isVisible()) {
+      const tableRows = page.locator("table tbody tr");
+      const firstRowBefore = await tableRows.first().textContent().catch(() => "");
+
       // Click to sort ascending
       await sortableHeader.click();
       await page.waitForTimeout(300);
@@ -114,8 +117,12 @@ test.describe("Chapters - Authenticated", () => {
       await sortableHeader.click();
       await page.waitForTimeout(300);
 
-      // Should have some sort indicator (arrow, icon, etc.)
-      // The exact indicator depends on the implementation
+      // Verify sort: check for sort icon or row order changed
+      const hasSortIcon = await sortableHeader.locator('button svg').count() > 0;
+      const firstRowAfter = await tableRows.first().textContent().catch(() => "");
+      const rowOrderChanged = firstRowBefore !== firstRowAfter;
+
+      expect(hasSortIcon || rowOrderChanged).toBeTruthy();
     }
   });
 

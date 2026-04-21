@@ -223,7 +223,9 @@ jobs:
         if: env.HAS_STAGING_SECRETS == 'true'
         env:
           TEST_SESSION_COOKIE: ${{ secrets.TEST_SESSION_COOKIE }}
-        run: npm run test:e2e
+        run: |
+          npm run test:e2e
+          npm run test:e2e:staging
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

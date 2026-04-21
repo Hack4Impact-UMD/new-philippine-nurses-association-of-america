@@ -4,6 +4,16 @@
  * Environment: Firebase Staging (pnaa-chaptermanagement-staging)
  * Config: Uses .env.staging.local via `npm run dev:staging`
  *
+ * Database Impact (per full test run):
+ * - Reads: ~10-15 Firestore reads (page loads that fetch campaign list).
+ *   Sorting/filtering are client-side (no additional reads).
+ * - Writes: 0-1 document creates (only in "create campaign" test, LOCAL ONLY).
+ *   Gated by testIfAuthLocalOnly - skipped in CI.
+ *   Created documents use "[E2E-TEST]" prefix for identification.
+ * - Deletes: 0 hard deletes. Archive test soft-deletes, LOCAL ONLY.
+ *
+ * Cleanup: Test data is identifiable by "[E2E-TEST]" prefix in campaign name.
+ *
  * Tests fundraising management:
  * - Campaign list display
  * - Create/edit campaigns
@@ -15,6 +25,10 @@ import { test, expect } from "@playwright/test";
 import { authenticateUser, hasAuthCredentials } from "../helpers/auth";
 
 const testIfAuth = hasAuthCredentials() ? test : test.skip;
+
+// For tests that create/mutate data - run locally only, skip in CI to protect staging
+const testIfAuthLocalOnly =
+  hasAuthCredentials() && !process.env.CI ? test : test.skip;
 
 test.describe("Fundraising - Unauthenticated", () => {
   test("redirects to signin when accessing fundraising", async ({ page }) => {
@@ -123,10 +137,9 @@ test.describe("Fundraising - Authenticated", () => {
         const newCardCount = await cards.count();
         const hasNoResults = await page.getByText(/no results|no campaigns/i).isVisible().catch(() => false);
 
-        // Filter should work: count changes, shows no results, or results still visible
+        // Filter should work: count changes or shows no results
         const countChanged = newRowCount !== initialRowCount || newCardCount !== initialCardCount;
-        const hasResults = newRowCount > 0 || newCardCount > 0;
-        expect(countChanged || hasNoResults || hasResults).toBeTruthy();
+        expect(countChanged || hasNoResults).toBeTruthy();
       }
     }
   });
@@ -177,7 +190,14 @@ test.describe("Fundraising - Form Validation", () => {
       if (value === "-100") {
         await page.locator('button[type="submit"]').click();
         await page.waitForTimeout(500);
-        // Should show error
+        // Should show validation error or stay on form
+        const hasError = await page
+          .locator('.text-red-500, .text-destructive, [role="alert"]')
+          .first()
+          .isVisible()
+          .catch(() => false);
+        const stayedOnForm = page.url().includes("/fundraising/new");
+        expect(hasError || stayedOnForm).toBeTruthy();
       }
     }
   });
@@ -222,8 +242,8 @@ test.describe("Fundraising - Form Validation", () => {
       await submitButton.click();
       await page.waitForTimeout(500);
 
-      // Should not have navigated away (validation failed)
-      expect(page.url()).toContain("/fundraising");
+      // Should still be on the /new form (validation should prevent navigation)
+      expect(page.url()).toContain("/fundraising/new");
     }
   });
 });
@@ -236,9 +256,10 @@ test.describe("Fundraising - CRUD Operations", () => {
     }
   });
 
-  // NOTE: This test creates real data in staging. Consider using testIfAuthLocalOnly
-  // if cleanup is not implemented. Created test campaigns should be manually archived.
-  testIfAuth("can create a new campaign", async ({ page }) => {
+  // Test data uses distinctive prefix for filtering from real data
+  const TEST_DATA_PREFIX = "[E2E-TEST]";
+
+  testIfAuthLocalOnly("can create a new campaign", async ({ page }) => {
     await page.goto("/fundraising/new");
 
     if (page.url().includes("/signin") || page.url().includes("/dashboard")) {
@@ -250,7 +271,7 @@ test.describe("Fundraising - CRUD Operations", () => {
     const nameInput = page.locator('input[name="fundraiserName"], input[name="name"]');
 
     if (await nameInput.isVisible()) {
-      const testName = `Test Fundraiser ${Date.now()}`;
+      const testName = `${TEST_DATA_PREFIX} Fundraiser ${Date.now()}`;
 
       await nameInput.fill(testName);
 
@@ -282,11 +303,18 @@ test.describe("Fundraising - CRUD Operations", () => {
     }
   });
 
-  testIfAuth("can archive a campaign", async ({ page }) => {
+  testIfAuthLocalOnly("can archive a campaign", async ({ page }) => {
     await page.goto("/fundraising");
     await page.waitForLoadState("networkidle");
 
-    // Get initial row count
+    // Filter to test data to avoid archiving real campaigns
+    const searchInput = page.locator('input[placeholder*="search" i]').first();
+    if (await searchInput.isVisible()) {
+      await searchInput.fill(TEST_DATA_PREFIX);
+      await page.waitForTimeout(500);
+    }
+
+    // Get row count after filtering to test data
     const tableRows = page.locator("table tbody tr");
     const initialCount = await tableRows.count();
 

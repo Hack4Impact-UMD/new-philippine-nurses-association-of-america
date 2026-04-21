@@ -1,7 +1,6 @@
 /node_modules
 /functions/node_modules
-pnaa-chapter-management-firebase-adminsdk-fbsvc-fc1a5f5216.json
-pnaa-chaptermanagement-staging-firebase-adminsdk-fbsvc-6513a32ac9.json
+*-firebase-adminsdk-*.json
 
 pnaa/.env.local
 pnaa/.env

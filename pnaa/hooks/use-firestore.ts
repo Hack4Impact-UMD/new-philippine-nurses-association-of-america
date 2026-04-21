@@ -19,10 +19,7 @@ export function useDocument<T>(
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    if (!docId) {
-      setLoading(false);
-      return;
-    }
+    if (!docId) return;
 
     const docRef = doc(db, collectionName, docId);
     const unsubscribe = onSnapshot(
@@ -45,7 +42,7 @@ export function useDocument<T>(
     return () => unsubscribe();
   }, [collectionName, docId]);
 
-  return { data, loading, error };
+  return { data, loading: docId ? loading : false, error };
 }
 
 export function useCollection<T>(
