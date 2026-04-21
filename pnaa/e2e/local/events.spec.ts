@@ -192,9 +192,9 @@ test.describe("Events - CRUD Operations", () => {
     }
   });
 
-  // NOTE: This test creates real data in staging. Skipped in CI since cleanup
-  // requires Firebase Admin access. Runs locally for manual verification.
-  // Created test events should be manually archived/deleted after test runs.
+  // Test data uses a distinctive prefix so it can be filtered and cleaned up.
+  const TEST_DATA_PREFIX = "[E2E-TEST]";
+
   testIfAuthLocalOnly("can create a new event", async ({ page }) => {
     await page.goto("/events/new");
 
@@ -208,7 +208,7 @@ test.describe("Events - CRUD Operations", () => {
     // Fill out the form
     const nameInput = page.locator('input[name="name"], input[id="name"]');
     if (await nameInput.isVisible()) {
-      const testEventName = `E2E Test Event ${Date.now()}`;
+      const testEventName = `${TEST_DATA_PREFIX} Event ${Date.now()}`;
 
       // Use dynamic future dates (30 and 31 days from now)
       const startDate = new Date();
@@ -258,6 +258,55 @@ test.describe("Events - CRUD Operations", () => {
 
       // Should have event information
       expect(pageText?.length).toBeGreaterThan(0);
+    }
+  });
+
+  // Runs after all CRUD tests (including on failure) to archive every
+  // [E2E-TEST] event left in staging, keeping the environment clean.
+  test.afterAll(async ({ browser }) => {
+    if (!hasAuthCredentials()) return;
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+      await authenticateUser(page);
+      await page.goto("/events");
+      await page.waitForLoadState("networkidle");
+
+      const searchInput = page.locator('input[placeholder*="search" i]').first();
+      if (!(await searchInput.isVisible())) return;
+
+      await searchInput.fill(TEST_DATA_PREFIX);
+      await page.waitForTimeout(500);
+
+      // Loop until no more test-data rows remain (handles partial failures
+      // that left multiple records behind).
+      for (let i = 0; i < 20; i++) {
+        const testRow = page
+          .locator("table tbody tr")
+          .filter({ hasText: TEST_DATA_PREFIX })
+          .first();
+        if (!(await testRow.isVisible().catch(() => false))) break;
+
+        const archiveButton = testRow
+          .locator('button:has-text("Archive"), button:has-text("Delete"), button[aria-label*="archive" i]')
+          .first();
+        if (!(await archiveButton.isVisible().catch(() => false))) break;
+
+        await archiveButton.click();
+        await page.waitForTimeout(300);
+
+        const confirmButton = page.locator(
+          '[role="alertdialog"] button:has-text("Archive"), button:has-text("Confirm"), button:has-text("Yes")'
+        );
+        if (await confirmButton.isVisible().catch(() => false)) {
+          await confirmButton.click();
+          await page.waitForTimeout(500);
+        }
+      }
+    } finally {
+      await context.close();
     }
   });
 });

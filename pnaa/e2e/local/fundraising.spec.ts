@@ -348,6 +348,55 @@ test.describe("Fundraising - CRUD Operations", () => {
       expect(rowRemoved || showsSuccess || hasArchivedLabel).toBeTruthy();
     }
   });
+
+  // Runs after all CRUD tests (including on failure) to archive every
+  // [E2E-TEST] campaign left in staging, keeping the environment clean.
+  test.afterAll(async ({ browser }) => {
+    if (!hasAuthCredentials()) return;
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+      await authenticateUser(page);
+      await page.goto("/fundraising");
+      await page.waitForLoadState("networkidle");
+
+      const searchInput = page.locator('input[placeholder*="search" i]').first();
+      if (!(await searchInput.isVisible())) return;
+
+      await searchInput.fill(TEST_DATA_PREFIX);
+      await page.waitForTimeout(500);
+
+      // Loop until no more test-data rows remain (handles partial failures
+      // that left multiple records behind).
+      for (let i = 0; i < 20; i++) {
+        const testRow = page
+          .locator("table tbody tr")
+          .filter({ hasText: TEST_DATA_PREFIX })
+          .first();
+        if (!(await testRow.isVisible().catch(() => false))) break;
+
+        const archiveButton = testRow
+          .locator('button:has-text("Archive"), button:has-text("Delete"), button[aria-label*="archive" i]')
+          .first();
+        if (!(await archiveButton.isVisible().catch(() => false))) break;
+
+        await archiveButton.click();
+        await page.waitForTimeout(300);
+
+        const confirmButton = page.locator(
+          '[role="alertdialog"] button:has-text("Archive"), button:has-text("Confirm"), button:has-text("Yes")'
+        );
+        if (await confirmButton.isVisible().catch(() => false)) {
+          await confirmButton.click();
+          await page.waitForTimeout(500);
+        }
+      }
+    } finally {
+      await context.close();
+    }
+  });
 });
 
 test.describe("Fundraising - Sorting", () => {
