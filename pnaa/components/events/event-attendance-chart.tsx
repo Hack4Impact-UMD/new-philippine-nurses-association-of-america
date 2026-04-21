@@ -98,7 +98,7 @@ export function EventAttendanceChart({ events, loading }: Props) {
             <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={36} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
-              formatter={(value: number) => [value.toLocaleString(), "Attendees"]}
+              formatter={(value) => [Number(value ?? 0).toLocaleString(), "Attendees"]}
             />
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
             {regions.map((region, i) => (
