@@ -26,7 +26,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const serviceAccount = require(
   path.resolve(
     __dirname,
-    "../../pnaa-chapter-management-firebase-adminsdk-fbsvc-fc1a5f5216.json"
+    "../../pnaa-chapter-management-firebase-adminsdk-fbsvc-ae69bf85fa.json"
   )
 ) as ServiceAccount;
 
