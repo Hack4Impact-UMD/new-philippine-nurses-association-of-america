@@ -10,6 +10,8 @@ exports.extractChapterName = extractChapterName;
 exports.mapContactToMember = mapContactToMember;
 exports.fetchWAContact = fetchWAContact;
 exports.fetchWAEvent = fetchWAEvent;
+exports.fetchWAEventRegistrations = fetchWAEventRegistrations;
+exports.fetchWARegistration = fetchWARegistration;
 exports.chapterSlug = chapterSlug;
 exports.recalculateChapterAggregates = recalculateChapterAggregates;
 const firestore_1 = require("firebase-admin/firestore");
@@ -122,6 +124,102 @@ async function fetchWAEvent(accessToken, accountId, eventId) {
         throw new Error(`WA event fetch failed (${eventId}): ${response.statusText}`);
     }
     return response.json();
+}
+//  "Parameters":
+//  {    
+//   "Action":"Created",
+//   "EventToRegister.Id":
+//   "3141837",
+//   "RegistrationType.Id":
+//   "4827912",
+//   "Registration.Id":
+//   "26119327"
+//  }
+async function fetchWAEventRegistrations(accessToken, accountId, eventId) {
+    // WA API paginates event registrations, so we loop until we get all pages.
+    const REG_PAGE_SIZE = 100;
+    let regSkip = 0;
+    let allRegistrations = [];
+    while (true) {
+        const url = `https://api.wildapricot.org/v2.1/Accounts/${accountId}/eventregistrations` +
+            `?eventId=${eventId}&$top=${REG_PAGE_SIZE}&$skip=${regSkip}`;
+        const response = await fetch(url, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                Accept: "application/json",
+            },
+        });
+        if (!response.ok) {
+            if (response.status === 404)
+                return [];
+            throw new Error(`WA event registrations fetch failed (event ${eventId}): ${response.statusText}`);
+        }
+        const data = await response.json();
+        const page = Array.isArray(data)
+            ? data
+            : (data.Registrations ?? []);
+        allRegistrations.push(...page);
+        regSkip += page.length;
+        if (page.length < REG_PAGE_SIZE)
+            break; // last page if less than page size
+    }
+    let regs = allRegistrations.map((reg) => {
+        const contact = (reg.Contact ?? {});
+        const regType = (reg.RegistrationType ?? {});
+        const event = (reg.Event ?? {});
+        return {
+            registrationId: String(reg.Id ?? ""),
+            eventId: String(event.Id ?? ""),
+            contactId: String(contact.Id ?? ""),
+            name: String(contact.Name ?? ""),
+            registrationTypeId: String(regType.Id ?? ""),
+            registrationType: String(regType.Name ?? ""),
+            organization: String(reg.Organization ?? ""),
+            isPaid: Boolean(reg.IsPaid ?? false),
+            registrationFee: Number(reg.RegistrationFee ?? 0),
+            paidSum: Number(reg.PaidSum ?? 0),
+            OnWaitlist: Boolean(reg.OnWaitlist ?? false),
+            Status: String(reg.Status ?? ""),
+        };
+    });
+    return regs;
+}
+/**
+ * Fetches a single WA event registration by its registration ID.
+ * Used by the webhook handler for Created/Changed/Deleted registration events.
+ * Returns null if not found.
+ */
+async function fetchWARegistration(accessToken, accountId, registrationId) {
+    const url = `https://api.wildapricot.org/v2.1/Accounts/${accountId}/eventregistrations/${registrationId}`;
+    const response = await fetch(url, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+        },
+    });
+    if (!response.ok) {
+        if (response.status === 404)
+            return null;
+        throw new Error(`WA registration fetch failed (${registrationId}): ${response.statusText}`);
+    }
+    const reg = await response.json();
+    const contact = (reg.Contact ?? {});
+    const regType = (reg.RegistrationType ?? {});
+    const event = (reg.Event ?? {});
+    return {
+        registrationId: String(reg.Id ?? ""),
+        eventId: String(event.Id ?? ""),
+        contactId: String(contact.Id ?? ""),
+        name: String(reg.DisplayName ?? contact.Name ?? ""),
+        registrationTypeId: String(regType.Id ?? ""),
+        registrationType: String(regType.Name ?? ""),
+        organization: String(reg.Organization ?? ""),
+        isPaid: Boolean(reg.IsPaid ?? false),
+        registrationFee: Number(reg.RegistrationFee ?? 0),
+        paidSum: Number(reg.PaidSum ?? 0),
+        OnWaitlist: Boolean(reg.OnWaitlist ?? false),
+        Status: String(reg.Status ?? ""),
+    };
 }
 /** Converts a chapter name to its Firestore document slug. */
 function chapterSlug(chapterName) {

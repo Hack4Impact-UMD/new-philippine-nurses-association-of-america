@@ -24,11 +24,13 @@ export interface AppEvent {
 
   // Metrics
   attendees: number;
+  registrations: number;
+  incompleteRegistrations: number;
+  totalRevenue: number;
   volunteers: number;
   participantsServed: number;
   contactHours: number;
   volunteerHours: number;
-
   // Subchapter association (optional)
   subchapterId?: string;
 

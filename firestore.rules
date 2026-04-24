@@ -44,6 +44,12 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isAdmin();
       allow update: if isAuthenticated() && isAdmin();
       allow delete: if false; // Soft delete only
+
+      // Attendees subcollection: read for authed users
+      match /attendees/{attendeeId} {
+        allow read: if isAuthenticated();
+        allow write: if false;
+      }
     }
 
     // Fundraising: read for authed, create/update for admins
