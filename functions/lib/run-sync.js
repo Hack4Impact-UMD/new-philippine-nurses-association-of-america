@@ -55,7 +55,7 @@ const firestore_1 = require("firebase-admin/firestore");
 // Load WA credentials from functions/.env
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 // Initialize Admin SDK with the production service account
-const serviceAccount = require(path.resolve(__dirname, "../../pnaa-chapter-management-firebase-adminsdk-fbsvc-fc1a5f5216.json"));
+const serviceAccount = require(path.resolve(__dirname, "../../pnaa-chapter-management-firebase-adminsdk-fbsvc-ae69bf85fa.json"));
 (0, app_1.initializeApp)({ credential: (0, app_1.cert)(serviceAccount) });
 const db = (0, firestore_1.getFirestore)();
 const WA_API_KEY = process.env.WILD_APRICOT_API_KEY;
@@ -227,12 +227,18 @@ async function runSyncMembers(startFrom, limit) {
             "Name" in contact.MembershipLevel
             ? String(contact.MembershipLevel.Name)
             : "";
+        let chapterName = extractChapterName(fieldValues);
+        // Treat members with no chapter on the Member-at-Large level as the
+        // "PNA Member-at-Large" chapter (mirrors syncMembers / webhook-handler).
+        if (!chapterName && membershipLevel === "Member-at-Large (1 year)") {
+            chapterName = "PNA Member-at-Large";
+        }
         allMembers.push({
             name: `${contact.FirstName || ""} ${contact.LastName || ""}`.trim(),
             email: String(contact.Email || ""),
             membershipLevel,
             renewalDueDate,
-            chapterName: extractChapterName(fieldValues),
+            chapterName,
             highestEducation: extractFieldValue(fieldValues, "Highest Level of Education"),
             memberId,
             region: extractFieldValue(fieldValues, "PNAA Region"),
@@ -274,7 +280,8 @@ async function runSyncMembers(startFrom, limit) {
                 totalMembers: 0,
                 totalActive: 0,
                 totalLapsed: 0,
-                region: member.region || "",
+                // PNA Member-at-Large is a pseudo-chapter with no region.
+                region: member.chapterName === "PNA Member-at-Large" ? "" : member.region || "",
             };
         }
         chapterCounts[member.chapterName].totalMembers++;
