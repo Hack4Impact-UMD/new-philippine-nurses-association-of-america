@@ -230,7 +230,7 @@ export const syncMembers = onRequest(
     
     const msg =
       `syncMembers: processed ${processed} contacts, ` +
-      `updated ${Object.keys(chapterCounts).length} chapters `S;
+      `updated ${Object.keys(chapterCounts).length} chapters `;
     console.log(msg);
     res.status(200).send(msg);
   }
