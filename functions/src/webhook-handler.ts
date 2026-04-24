@@ -395,8 +395,17 @@ async function handleEventRegistration(
 
     if (!eventSnap.exists) {
       // Registration Changed arrived before the Event Created webhook landed (or the
-      // event was hard-deleted). Skip the event-count update; a later syncEvents run
-      // will reconcile counts once the parent event doc is created.
+      // event was hard-deleted). Mirror the Created path's pendingRegistrations marker
+      // so out-of-order deliveries are surfaced for reconciliation alongside the
+      // attendee doc we just wrote. Counts will be reconciled by the next syncEvents run.
+      const pendingRef = db.collection("pendingRegistrations").doc(registrationId);
+      tx.set(pendingRef, {
+        eventId,
+        registrationId,
+        attendeeData,
+        retryCount: 0,
+        createdAt: Timestamp.now(),
+      });
       return { status: "event-missing" as const };
     }
 

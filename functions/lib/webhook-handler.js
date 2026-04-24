@@ -155,45 +155,56 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
     const eventRef = db.collection("events").doc(eventId);
     // Doc ID is registrationId — Deleted can target it directly without a Firestore query
     const attendeeRef = eventRef.collection("attendees").doc(registrationId);
-    // If a full sync is in progress for this event, skip — sync is authoritative
-    const lockSnap = await eventRef.get();
-    if (lockSnap.exists) {
-        const syncLock = lockSnap.data()?.syncLock;
-        if (syncLock && firestore_1.Timestamp.now().toMillis() - syncLock.toMillis() < 6 * 60 * 1000) {
-            console.log(`wildApricotWebhook [EventRegistration]: sync in progress for event ${eventId} — skipping ${action}`);
-            return;
-        }
-    }
+    const SYNC_LOCK_TTL_MS = 6 * 60 * 1000;
     // Deleted: remove the element.
     if (action === "Deleted") {
         console.log(`wildApricotWebhook [EventRegistration/Deleted]: checking if attendee doc ${registrationId} exists`);
-        const existing = await attendeeRef.get();
-        if (!existing.exists) {
-            console.log(`wildApricotWebhook [EventRegistration/Deleted]: attendee ${registrationId} not found in Firestore — nothing to delete`);
-            return;
-        }
-        const existingData = existing.data() ?? {};
-        const oldPaidSum = Number(existingData.paidSum ?? 0);
-        const oldStatus = String(existingData.Status ?? "");
-        const wasIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
-        const batch = db.batch();
-        batch.delete(attendeeRef);
-        const eventDoc = await eventRef.get();
-        if (!eventDoc.exists) {
-            console.log(`wildApricotWebhook [EventRegistration/Deleted]: event ${eventId} not found — deleting orphaned attendee only`);
-            await attendeeRef.delete();
-            return;
-        }
-        batch.update(eventRef, {
-            attendees: firestore_1.FieldValue.increment(-1),
-            registrations: firestore_1.FieldValue.increment(-1),
-            ...(oldPaidSum !== 0 && { totalRevenue: firestore_1.FieldValue.increment(-oldPaidSum) }),
-            ...(wasIncomplete && { incompleteRegistrations: firestore_1.FieldValue.increment(-1) }),
-            lastUpdated: firestore_1.Timestamp.now(),
-            lastUpdatedUser: "WildApricot",
+        const result = await db.runTransaction(async (tx) => {
+            const eventSnap = await tx.get(eventRef);
+            if (eventSnap.exists) {
+                const syncLock = eventSnap.data()?.syncLock;
+                if (syncLock && firestore_1.Timestamp.now().toMillis() - syncLock.toMillis() < SYNC_LOCK_TTL_MS) {
+                    return { status: "sync-in-progress" };
+                }
+            }
+            const existing = await tx.get(attendeeRef);
+            if (!existing.exists) {
+                return { status: "missing" };
+            }
+            const existingData = existing.data() ?? {};
+            const oldPaidSum = Number(existingData.paidSum ?? 0);
+            const oldStatus = String(existingData.Status ?? "");
+            const wasIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
+            tx.delete(attendeeRef);
+            if (eventSnap.exists) {
+                tx.update(eventRef, {
+                    attendees: firestore_1.FieldValue.increment(-1),
+                    registrations: firestore_1.FieldValue.increment(-1),
+                    ...(oldPaidSum !== 0 && { totalRevenue: firestore_1.FieldValue.increment(-oldPaidSum) }),
+                    ...(wasIncomplete && { incompleteRegistrations: firestore_1.FieldValue.increment(-1) }),
+                    lastUpdated: firestore_1.Timestamp.now(),
+                    lastUpdatedUser: "WildApricot",
+                });
+            }
+            return {
+                status: "deleted",
+                oldPaidSum,
+                wasIncomplete,
+                eventMissing: !eventSnap.exists,
+            };
         });
-        await batch.commit();
-        console.log(`wildApricotWebhook [EventRegistration/Deleted]: deleted attendee ${registrationId} from event ${eventId}, revenue: -${oldPaidSum}, incomplete: ${wasIncomplete ? "-1" : "0"})`);
+        if (result.status === "sync-in-progress") {
+            console.log(`wildApricotWebhook [EventRegistration/Deleted]: sync in progress for event ${eventId} — skipping`);
+        }
+        else if (result.status === "missing") {
+            console.log(`wildApricotWebhook [EventRegistration/Deleted]: attendee ${registrationId} not found in Firestore — nothing to delete`);
+        }
+        else if (result.eventMissing) {
+            console.log(`wildApricotWebhook [EventRegistration/Deleted]: event ${eventId} not found — deleted orphaned attendee only`);
+        }
+        else {
+            console.log(`wildApricotWebhook [EventRegistration/Deleted]: deleted attendee ${registrationId} from event ${eventId}, revenue: -${result.oldPaidSum}, incomplete: ${result.wasIncomplete ? "-1" : "0"}`);
+        }
         return;
     }
     console.log(`wildApricotWebhook [EventRegistration/${action}]: fetching registration ${registrationId} from WA`);
@@ -223,25 +234,18 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
     const newStatus = attendeeData.Status;
     const newIsIncomplete = newStatus !== "Paid" && newStatus !== "Free";
     if (action === "Created") {
-        console.log(`wildApricotWebhook [EventRegistration/Created]: checking if attendee doc ${registrationId} already exists`);
-        const existingAttendee = await attendeeRef.get();
-        if (existingAttendee.exists) {
-            console.log(`wildApricotWebhook [EventRegistration/Created]: attendee ${registrationId} already exists — updating without incrementing count`);
-            await attendeeRef.set(attendeeData);
-            return;
-        }
         console.log(`wildApricotWebhook [EventRegistration/Created]: checking event doc ${eventId} exists`);
-        let eventDoc = await eventRef.get();
-        if (!eventDoc.exists) {
+        let eventExists = (await eventRef.get()).exists;
+        if (!eventExists) {
             const MAX_ATTEMPTS = 4;
             const BASE_DELAY_MS = 500;
-            for (let attempt = 1; attempt <= MAX_ATTEMPTS && !eventDoc.exists; attempt++) {
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS && !eventExists; attempt++) {
                 const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // Doubles wait time each interval -> 500 to 4000ms
                 console.log(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found — retry ${attempt}/${MAX_ATTEMPTS} in ${delay}ms`);
                 await sleep(delay); // Defined at top of file
-                eventDoc = await eventRef.get();
+                eventExists = (await eventRef.get()).exists;
             }
-            if (!eventDoc.exists) {
+            if (!eventExists) {
                 // Event still missing after retries — write a durable pending record.
                 console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} not found after retries — writing pendingRegistration ${registrationId}`);
                 await db.collection("pendingRegistrations").doc(registrationId).set({
@@ -254,31 +258,110 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
                 return;
             }
         }
-        const batch = db.batch();
-        batch.set(attendeeRef, attendeeData);
-        batch.update(eventRef, {
-            attendees: firestore_1.FieldValue.increment(1),
-            registrations: firestore_1.FieldValue.increment(1),
-            ...(newPaidSum !== 0 && { totalRevenue: firestore_1.FieldValue.increment(newPaidSum) }),
-            ...(newIsIncomplete && { incompleteRegistrations: firestore_1.FieldValue.increment(1) }),
-            lastUpdated: firestore_1.Timestamp.now(),
-            lastUpdatedUser: "WildApricot",
+        const pendingRef = db.collection("pendingRegistrations").doc(registrationId);
+        const result = await db.runTransaction(async (tx) => {
+            const eventSnap = await tx.get(eventRef);
+            const existingAttendee = await tx.get(attendeeRef);
+            if (!eventSnap.exists) {
+                // Event disappeared between the retry loop and the transaction (rare —
+                // webhook soft-deletes leave the doc in place). Defer via pendingRegistrations
+                // instead of orphaning an attendee under a missing parent.
+                tx.set(pendingRef, {
+                    eventId,
+                    registrationId,
+                    attendeeData,
+                    retryCount: 0,
+                    createdAt: firestore_1.Timestamp.now(),
+                });
+                return { status: "event-missing-pending" };
+            }
+            const syncLock = eventSnap.data()?.syncLock;
+            if (syncLock && firestore_1.Timestamp.now().toMillis() - syncLock.toMillis() < SYNC_LOCK_TTL_MS) {
+                return { status: "sync-in-progress" };
+            }
+            if (existingAttendee.exists) {
+                // Replay / duplicate Created — mirror the Changed-branch delta logic so
+                // event aggregates stay consistent when WA re-delivers a Created event.
+                const oldData = existingAttendee.data() ?? {};
+                const oldPaidSum = Number(oldData.paidSum ?? 0);
+                const oldStatus = String(oldData.Status ?? "");
+                const oldIsIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
+                const revenueDelta = newPaidSum - oldPaidSum;
+                const incompleteDelta = (newIsIncomplete ? 1 : 0) - (oldIsIncomplete ? 1 : 0);
+                tx.set(attendeeRef, attendeeData);
+                tx.update(eventRef, {
+                    ...(revenueDelta !== 0 && { totalRevenue: firestore_1.FieldValue.increment(revenueDelta) }),
+                    ...(incompleteDelta !== 0 && { incompleteRegistrations: firestore_1.FieldValue.increment(incompleteDelta) }),
+                    lastUpdated: firestore_1.Timestamp.now(),
+                    lastUpdatedUser: "WildApricot",
+                });
+                return { status: "replayed", revenueDelta, incompleteDelta };
+            }
+            tx.set(attendeeRef, attendeeData);
+            tx.update(eventRef, {
+                attendees: firestore_1.FieldValue.increment(1),
+                registrations: firestore_1.FieldValue.increment(1),
+                ...(newPaidSum !== 0 && { totalRevenue: firestore_1.FieldValue.increment(newPaidSum) }),
+                ...(newIsIncomplete && { incompleteRegistrations: firestore_1.FieldValue.increment(1) }),
+                lastUpdated: firestore_1.Timestamp.now(),
+                lastUpdatedUser: "WildApricot",
+            });
+            return { status: "added" };
         });
-        await batch.commit();
-        console.log(`wildApricotWebhook [EventRegistration/Created]: added attendee ${registrationId} to event ${eventId} (revenue: +${newPaidSum}, incomplete: ${newIsIncomplete ? "+1" : "0"})`);
-    }
-    else {
-        // Changed — overwrite doc, compute deltas against old Firestore values
-        console.log(`wildApricotWebhook [EventRegistration/Changed]: checking if attendee doc ${registrationId} exists`);
-        const [existingAttendee, eventDoc] = await Promise.all([attendeeRef.get(), eventRef.get()]);
-        if (!existingAttendee.exists) {
-            console.error(`wildApricotWebhook [EventRegistration/Changed]: attendee ${registrationId} not found in Firestore — skipping update`);
-            return;
+        if (result.status === "sync-in-progress") {
+            console.log(`wildApricotWebhook [EventRegistration/Created]: sync in progress for event ${eventId} — skipping`);
         }
-        if (!eventDoc.exists) {
-            console.error(`wildApricotWebhook [EventRegistration/Changed]: event ${eventId} not found in Firestore — updating attendee only`);
-            await attendeeRef.set(attendeeData);
-            return;
+        else if (result.status === "event-missing-pending") {
+            console.error(`wildApricotWebhook [EventRegistration/Created]: event ${eventId} disappeared between retry and transaction — wrote pendingRegistration ${registrationId}`);
+        }
+        else if (result.status === "replayed") {
+            console.log(`wildApricotWebhook [EventRegistration/Created]: attendee ${registrationId} already exists — upserted (revenueDelta: ${result.revenueDelta}, incompleteDelta: ${result.incompleteDelta})`);
+        }
+        else {
+            console.log(`wildApricotWebhook [EventRegistration/Created]: added attendee ${registrationId} to event ${eventId} (revenue: +${newPaidSum}, incomplete: ${newIsIncomplete ? "+1" : "0"})`);
+        }
+        return;
+    }
+    // Changed — reconcile attendee doc; handle out-of-order delivery (Changed before Created).
+    console.log(`wildApricotWebhook [EventRegistration/Changed]: reconciling attendee doc ${registrationId}`);
+    const result = await db.runTransaction(async (tx) => {
+        const eventSnap = await tx.get(eventRef);
+        const existingAttendee = await tx.get(attendeeRef);
+        if (eventSnap.exists) {
+            const syncLock = eventSnap.data()?.syncLock;
+            if (syncLock && firestore_1.Timestamp.now().toMillis() - syncLock.toMillis() < SYNC_LOCK_TTL_MS) {
+                return { status: "sync-in-progress" };
+            }
+        }
+        // Always upsert: fetchWARegistration already returned the full payload, so losing
+        // this write to preserve orphan-avoidance would drop an out-of-order Changed.
+        tx.set(attendeeRef, attendeeData);
+        if (!eventSnap.exists) {
+            // Registration Changed arrived before the Event Created webhook landed (or the
+            // event was hard-deleted). Mirror the Created path's pendingRegistrations marker
+            // so out-of-order deliveries are surfaced for reconciliation alongside the
+            // attendee doc we just wrote. Counts will be reconciled by the next syncEvents run.
+            const pendingRef = db.collection("pendingRegistrations").doc(registrationId);
+            tx.set(pendingRef, {
+                eventId,
+                registrationId,
+                attendeeData,
+                retryCount: 0,
+                createdAt: firestore_1.Timestamp.now(),
+            });
+            return { status: "event-missing" };
+        }
+        if (!existingAttendee.exists) {
+            // Out-of-order delivery: Changed arrived before Created — treat as insert.
+            tx.update(eventRef, {
+                attendees: firestore_1.FieldValue.increment(1),
+                registrations: firestore_1.FieldValue.increment(1),
+                ...(newPaidSum !== 0 && { totalRevenue: firestore_1.FieldValue.increment(newPaidSum) }),
+                ...(newIsIncomplete && { incompleteRegistrations: firestore_1.FieldValue.increment(1) }),
+                lastUpdated: firestore_1.Timestamp.now(),
+                lastUpdatedUser: "WildApricot",
+            });
+            return { status: "inserted-out-of-order" };
         }
         const oldData = existingAttendee.data() ?? {};
         const oldPaidSum = Number(oldData.paidSum ?? 0);
@@ -286,16 +369,25 @@ async function handleEventRegistration(eventId, registrationId, action, webhookS
         const oldIsIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
         const revenueDelta = newPaidSum - oldPaidSum;
         const incompleteDelta = (newIsIncomplete ? 1 : 0) - (oldIsIncomplete ? 1 : 0);
-        const batch = db.batch();
-        batch.set(attendeeRef, attendeeData);
-        batch.update(eventRef, {
+        tx.update(eventRef, {
             ...(revenueDelta !== 0 && { totalRevenue: firestore_1.FieldValue.increment(revenueDelta) }),
             ...(incompleteDelta !== 0 && { incompleteRegistrations: firestore_1.FieldValue.increment(incompleteDelta) }),
             lastUpdated: firestore_1.Timestamp.now(),
             lastUpdatedUser: "WildApricot",
         });
-        await batch.commit();
-        console.log(`wildApricotWebhook [EventRegistration/Changed]: updated attendee ${registrationId} on event ${eventId} (revenueDelta: ${revenueDelta}, incompleteDelta: ${incompleteDelta})`);
+        return { status: "updated", revenueDelta, incompleteDelta };
+    });
+    if (result.status === "sync-in-progress") {
+        console.log(`wildApricotWebhook [EventRegistration/Changed]: sync in progress for event ${eventId} — skipping`);
+    }
+    else if (result.status === "event-missing") {
+        console.log(`wildApricotWebhook [EventRegistration/Changed]: event ${eventId} not found — upserted attendee ${registrationId} only (counts deferred to next sync)`);
+    }
+    else if (result.status === "inserted-out-of-order") {
+        console.log(`wildApricotWebhook [EventRegistration/Changed]: out-of-order delivery for attendee ${registrationId} on event ${eventId} — inserted and incremented counts (revenue: +${newPaidSum}, incomplete: ${newIsIncomplete ? "+1" : "0"})`);
+    }
+    else {
+        console.log(`wildApricotWebhook [EventRegistration/Changed]: updated attendee ${registrationId} on event ${eventId} (revenueDelta: ${result.revenueDelta}, incompleteDelta: ${result.incompleteDelta})`);
     }
 }
 async function handleEvent(eventId, action) {
