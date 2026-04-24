@@ -119,6 +119,11 @@ async function handleContact(waContactId: string): Promise<void> {
     return;
   }
 
+  // Must run before the member doc write so stored chapterName matches syncMembers.
+  if (!member.chapterName && member.membershipLevel === "Member-at-Large (1 year)") {
+    member.chapterName = "PNA Member-at-Large";
+  }
+
   const docRef = db.collection("members").doc(member.memberId);
 
   // Read old state before overwriting so we can compute the exact chapter delta
@@ -133,6 +138,8 @@ async function handleContact(waContactId: string): Promise<void> {
 
   const newChapterName = member.chapterName || "";
   const newActiveStatus = member.activeStatus;
+  // PNA Member-at-Large chapter has no region (matches syncMembers).
+  const newChapterRegion = newChapterName === "PNA Member-at-Large" ? "" : member.region;
   const chapterBatch = db.batch();
   let chapterUpdates = 0;
 
@@ -155,7 +162,7 @@ async function handleContact(waContactId: string): Promise<void> {
       // Member joined this chapter (new member or chapter transfer)
       chapterBatch.set(newChapterRef, {
         name: newChapterName,
-        region: member.region,
+        region: newChapterRegion,
         totalMembers: FieldValue.increment(1),
         ...(newActiveStatus === "Active" && { totalActive: FieldValue.increment(1) }),
         ...(newActiveStatus === "Lapsed" && { totalLapsed: FieldValue.increment(1) }),
@@ -167,7 +174,7 @@ async function handleContact(waContactId: string): Promise<void> {
       const activeDelta = newActiveStatus === "Active" ? 1 : -1;
       chapterBatch.set(newChapterRef, {
         name: newChapterName,
-        region: member.region,
+        region: newChapterRegion,
         totalActive: FieldValue.increment(activeDelta),
         totalLapsed: FieldValue.increment(-activeDelta),
         lastUpdated: Timestamp.now(),

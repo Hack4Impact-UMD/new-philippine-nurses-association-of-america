@@ -269,12 +269,19 @@ async function runSyncMembers(startFrom: number, limit: number) {
         ? String((contact.MembershipLevel as { Name: unknown }).Name)
         : "";
 
+    let chapterName = extractChapterName(fieldValues);
+    // Treat members with no chapter on the Member-at-Large level as the
+    // "PNA Member-at-Large" chapter (mirrors syncMembers / webhook-handler).
+    if (!chapterName && membershipLevel === "Member-at-Large (1 year)") {
+      chapterName = "PNA Member-at-Large";
+    }
+
     allMembers.push({
       name: `${contact.FirstName || ""} ${contact.LastName || ""}`.trim(),
       email: String(contact.Email || ""),
       membershipLevel,
       renewalDueDate,
-      chapterName: extractChapterName(fieldValues),
+      chapterName,
       highestEducation: extractFieldValue(
         fieldValues,
         "Highest Level of Education"
@@ -327,7 +334,8 @@ async function runSyncMembers(startFrom: number, limit: number) {
         totalMembers: 0,
         totalActive: 0,
         totalLapsed: 0,
-        region: member.region || "",
+        // PNA Member-at-Large is a pseudo-chapter with no region.
+        region: member.chapterName === "PNA Member-at-Large" ? "" : member.region || "",
       };
     }
 

@@ -31,7 +31,7 @@ async function fetchAllWAContacts(
   };
 
   // Step 1: Initiate the contacts request
-  const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts`;
+  const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$filter=Archived%20eq%20false`;
   const initResponse = await fetch(initUrl, { headers: authHeaders });
   if (!initResponse.ok) {
     throw new Error(`WA contacts request failed: ${initResponse.statusText}`);
@@ -97,7 +97,7 @@ async function fetchAllWAContacts(
 // Real-time updates are handled by the wildApricotWebhook function.
 // Call with: POST /syncMembers?key=[WEBHOOK_SECRET]
 export const syncMembers = onRequest(
-  { timeoutSeconds: 540 },
+  { timeoutSeconds: 720 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -130,6 +130,13 @@ export const syncMembers = onRequest(
 
     for (const memberData of allMembers) {
       const docRef = db.collection("members").doc(memberData.memberId);
+
+      // Treat members with no chapter on the Member-at-Large level as the
+      // "PNA Member-at-Large" chapter (mirrors webhook-handler).
+      if (!memberData.chapterName && memberData.membershipLevel === "Member-at-Large (1 year)") {
+        memberData.chapterName = "PNA Member-at-Large";
+      }
+
       batch.set(docRef, memberData, { merge: true });
       batchCount++;
       processed++;
@@ -164,7 +171,8 @@ export const syncMembers = onRequest(
           totalMembers: 0,
           totalActive: 0,
           totalLapsed: 0,
-          region: member.region,
+          // PNA Member-at-Large is a pseudo-chapter with no region.
+          region: member.chapterName === "PNA Member-at-Large" ? "" : member.region,
         };
       }
 

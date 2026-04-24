@@ -93,6 +93,10 @@ async function handleContact(waContactId) {
         console.log(`wildApricotWebhook: contact ${waContactId} is archived, skipping`);
         return;
     }
+    // Must run before the member doc write so stored chapterName matches syncMembers.
+    if (!member.chapterName && member.membershipLevel === "Member-at-Large (1 year)") {
+        member.chapterName = "PNA Member-at-Large";
+    }
     const docRef = db.collection("members").doc(member.memberId);
     // Read old state before overwriting so we can compute the exact chapter delta
     const oldDoc = await docRef.get();
@@ -104,6 +108,8 @@ async function handleContact(waContactId) {
     await docRef.set(member, { merge: true });
     const newChapterName = member.chapterName || "";
     const newActiveStatus = member.activeStatus;
+    // PNA Member-at-Large chapter has no region (matches syncMembers).
+    const newChapterRegion = newChapterName === "PNA Member-at-Large" ? "" : member.region;
     const chapterBatch = db.batch();
     let chapterUpdates = 0;
     if (oldChapterName && oldChapterName !== newChapterName) {
@@ -123,7 +129,7 @@ async function handleContact(waContactId) {
             // Member joined this chapter (new member or chapter transfer)
             chapterBatch.set(newChapterRef, {
                 name: newChapterName,
-                region: member.region,
+                region: newChapterRegion,
                 totalMembers: firestore_1.FieldValue.increment(1),
                 ...(newActiveStatus === "Active" && { totalActive: firestore_1.FieldValue.increment(1) }),
                 ...(newActiveStatus === "Lapsed" && { totalLapsed: firestore_1.FieldValue.increment(1) }),
@@ -136,7 +142,7 @@ async function handleContact(waContactId) {
             const activeDelta = newActiveStatus === "Active" ? 1 : -1;
             chapterBatch.set(newChapterRef, {
                 name: newChapterName,
-                region: member.region,
+                region: newChapterRegion,
                 totalActive: firestore_1.FieldValue.increment(activeDelta),
                 totalLapsed: firestore_1.FieldValue.increment(-activeDelta),
                 lastUpdated: firestore_1.Timestamp.now(),

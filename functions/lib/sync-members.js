@@ -21,7 +21,7 @@ async function fetchAllWAContacts(accessToken, accountId) {
         Accept: "application/json",
     };
     // Step 1: Initiate the contacts request
-    const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts`;
+    const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$filter=Archived%20eq%20false`;
     const initResponse = await fetch(initUrl, { headers: authHeaders });
     if (!initResponse.ok) {
         throw new Error(`WA contacts request failed: ${initResponse.statusText}`);
@@ -75,7 +75,7 @@ async function fetchAllWAContacts(accessToken, accountId) {
 // HTTP endpoint for manually triggering a full member sync.
 // Real-time updates are handled by the wildApricotWebhook function.
 // Call with: POST /syncMembers?key=[WEBHOOK_SECRET]
-exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 540 }, async (req, res) => {
+exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 720 }, async (req, res) => {
     if (req.method !== "POST") {
         res.status(405).send("Method Not Allowed");
         return;
@@ -102,6 +102,11 @@ exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 540 }, async (req
     let processed = 0;
     for (const memberData of allMembers) {
         const docRef = db.collection("members").doc(memberData.memberId);
+        // Treat members with no chapter on the Member-at-Large level as the
+        // "PNA Member-at-Large" chapter (mirrors webhook-handler).
+        if (!memberData.chapterName && memberData.membershipLevel === "Member-at-Large (1 year)") {
+            memberData.chapterName = "PNA Member-at-Large";
+        }
         batch.set(docRef, memberData, { merge: true });
         batchCount++;
         processed++;
@@ -124,7 +129,8 @@ exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 540 }, async (req
                 totalMembers: 0,
                 totalActive: 0,
                 totalLapsed: 0,
-                region: member.region,
+                // PNA Member-at-Large is a pseudo-chapter with no region.
+                region: member.chapterName === "PNA Member-at-Large" ? "" : member.region,
             };
         }
         chapterCounts[member.chapterName].totalMembers++;
