@@ -1,9 +1,12 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, HandHelping, Clock, UserCheck, Heart, CircleDollarSign } from "lucide-react";
+import { useIsNationalAdmin } from "@/hooks/use-auth";
 import type { AppEvent } from "@/types/event";
 
-const metricConfig = [
-  { key: "totalRevenue" as const, label: "Total Revenue", icon: CircleDollarSign },
+const baseMetricConfig = [
+  { key: "totalRevenue" as const, label: "Total Revenue", icon: CircleDollarSign, nationalAdminOnly: true },
   { key: "attendees" as const, label: "Attendees", icon: Users },
   { key: "volunteers" as const, label: "Volunteers", icon: HandHelping },
 
@@ -16,6 +19,10 @@ const metricConfig = [
 ];
 
 export function EventMetrics({ event }: { event: AppEvent }) {
+  const isNationalAdmin = useIsNationalAdmin();
+  const metricConfig = baseMetricConfig.filter(
+    (m) => !m.nationalAdminOnly || isNationalAdmin
+  );
   const hasMetrics = metricConfig.some((m) => event[m.key] > 0);
 
   if (!hasMetrics && event.source === "wildapricot") {

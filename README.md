@@ -22,16 +22,18 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 
 ## Features
 
-- **Dashboard** — Real-time stats (total/active/lapsed members, chapters, upcoming events, total fundraised)
-- **Chapter Management** — Browse all chapters, view chapter-level member breakdowns; chapter aliases merge stats from alternative Wild Apricot names
-- **Event Management** — Create, edit, and view events with metrics (attendees, volunteers, contact hours, etc.); synced from Wild Apricot via scheduled functions and real-time webhooks
-- **Fundraising** — Track fundraising campaigns with amounts, notes, and chapter attribution
-- **Subchapters** — Create subchapters within chapters, assign members, soft-delete support
-- **Member Sync** — Automated Wild Apricot membership sync via scheduled Cloud Functions (daily) and real-time webhooks
+- **Dashboard** — Real-time stats (total/active/lapsed members, chapters, upcoming events, total fundraised) plus chapter-list, fundraising-progress, and upcoming-events widgets
+- **Chapter Management** — Browse all chapters, view chapter-level member breakdowns and activity charts; chapter aliases merge stats from alternative Wild Apricot names
+- **Event Management** — Create, edit, and view events with metrics (attendees, registrations, revenue, volunteers, contact hours, etc.); per-event attendee subcollection synced from Wild Apricot; event posters uploaded to Firebase Storage. Revenue figures and attendee payment amounts are visible to national admins only — other roles see paid / unpaid / free status without dollar amounts.
+- **Fundraising** — Track fundraising campaigns with amounts, notes, chapter and optional subchapter attribution; campaign trend chart on detail pages
+- **Subchapters** — Create subchapters within chapters, assign members, soft-delete support; events and fundraising can be tagged to a subchapter
+- **Member Sync** — Wild Apricot membership sync via real-time webhooks (Contact / Membership / Event), manual full-sync HTTP endpoints, and a daily 2 AM ET scheduled status recalculation
 - **First-Time Onboarding** — New users select their region and chapter on first sign-in; this can only be changed later by a national admin via the user management page
 - **Role-Based Access** — National admins see all data; region admins manage their region; chapter admins manage their chapter; members have read-only access
 - **User Management** — National admins can view all users and update roles, regions, and chapter assignments
 - **Advanced Data Tables** — Chapters, Events, and Fundraising pages feature a rich table view with sortable, resizable, and drag-to-reorder columns; per-column filters; column visibility toggles; and pagination. Switchable to a card grid via a pill toggle.
+- **Excel Export** — Tabular data exports to `.xlsx` via ExcelJS for offline analysis
+- **Charts** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress
 - **Responsive UI** — Mobile-friendly with sidebar navigation and dark mode support
 
 ---
@@ -51,6 +53,9 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 | React Hook Form | 7.71.2 | Form state management |
 | Zod | 4.3.6 | Schema validation |
 | date-fns | 4.1.0 | Date utilities |
+| react-day-picker | 9 | Calendar / date picker UI |
+| Recharts | 3 | Chart rendering (chapter activity, event attendance, fundraising) |
+| ExcelJS | 4 | Excel (`.xlsx`) export of table data |
 | Lucide React | — | Icons |
 | Sonner | — | Toast notifications |
 | next-themes | — | Dark mode |
@@ -77,16 +82,16 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 │                     │ Real-time listeners                   │
 └─────────────────────┼───────────────────────────────────────┘
                       │
-        ┌─────────────┴─────────────┐
-        │         Firestore         │
-        │  members / events /       │
-        │  fundraising / chapters / │
-        │  subchapters / users /    │
-        │  chapter_aliases          │
-        └──────────┬────────────────┘
+        ┌─────────────┴───────────────────┐
+        │           Firestore             │
+        │  members / chapters /           │
+        │  events (+ attendees subcoll) / │
+        │  fundraising / subchapters /    │
+        │  users / chapter_aliases        │
+        └──────────┬──────────────────────┘
                    │
      ┌─────────────┴──────────────────┐
-     │    Firebase Cloud Functions     │
+     │    Firebase Cloud Functions    │
      │  • syncMembers  (HTTP, manual) │
      │  • syncEvents   (HTTP, manual) │
      │  • updateMembers (daily 2 AM)  │
@@ -187,21 +192,31 @@ philippine-nurses-association-of-america/
     │       ├── dashboard/
     │       ├── chapters/[chapterId]/
     │       │   ├── aliases/
-    │       │   └── subchapters/[subchapterId]/
-    │       ├── events/[eventId]/edit/
-    │       ├── fundraising/[fundraisingId]/edit/
+    │       │   └── subchapters/
+    │       │       ├── new/
+    │       │       └── [subchapterId]/
+    │       │           └── edit/
+    │       ├── events/
+    │       │   ├── new/
+    │       │   └── [eventId]/
+    │       │       └── edit/
+    │       ├── fundraising/
+    │       │   ├── new/
+    │       │   └── [fundraisingId]/
+    │       │       └── edit/
     │       ├── users/          # User management (national_admin only)
     │       └── about/
     ├── components/
     │   ├── ui/                 # shadcn/ui primitives
     │   ├── auth/               # OnboardingGuard
     │   ├── layout/             # Header, Sidebar, MobileNav
-    │   ├── dashboard/          # Stats cards, widgets
-    │   ├── events/             # Event list, card, form, detail
-    │   ├── chapters/           # Chapter list, card, detail
-    │   ├── fundraising/        # Campaign list, card, form, detail
+    │   ├── dashboard/          # Stats cards, chapter list widget, fundraising progress, upcoming events
+    │   ├── events/             # Event list/card/form/detail, attendee list, attendance & metrics charts
+    │   ├── chapters/           # Chapter list/card/detail, aliases manager, activity chart
+    │   ├── fundraising/        # Campaign list/card/form/detail, fundraising chart
+    │   ├── subchapters/        # Subchapter list/form/detail
     │   ├── users/              # User list with edit dialog
-    │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, ViewToggle
+    │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, DataTable, ViewToggle, FileUpload, EmptyState, StatusBadge
     ├── hooks/
     │   ├── use-auth.ts         # Auth helpers (role checks, chapter/region getters)
     │   ├── use-firestore.ts    # useDocument / useCollection (real-time listeners)
@@ -218,15 +233,18 @@ philippine-nurses-association-of-america/
     │   │   ├── firestore.ts    # Firestore helpers
     │   │   ├── storage.ts      # Storage helpers
     │   │   └── index.ts
-    │   └── wild-apricot/
-    │       └── oauth.ts        # OAuth + API utilities
+    │   ├── wild-apricot/
+    │   │   └── oauth.ts        # OAuth + API utilities
+    │   └── utils.ts            # Shared client utilities (cn, formatters, etc.)
     └── types/
+        ├── index.ts            # Barrel export
         ├── user.ts
         ├── member.ts
         ├── chapter.ts
         ├── chapter-alias.ts
         ├── subchapter.ts
         ├── event.ts
+        ├── attendee.ts
         └── fundraising.ts
 ```
 
@@ -413,9 +431,9 @@ firebase deploy --only functions
 | Function | Trigger | Description |
 |---|---|---|
 | `syncMembers` | HTTP (POST, manual) | Full member sync: fetches all contacts from Wild Apricot via async job polling, upserts to `members` collection in batches of 450, rebuilds chapter aggregates. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 540s. |
-| `syncEvents` | HTTP (POST, manual) | Full event sync: fetches all events from Wild Apricot, **insert-only** — existing events are never overwritten. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 300s. |
+| `syncEvents` | HTTP (POST, manual) | Full event sync: fetches all events from Wild Apricot. Event docs are **insert-only** — existing event app fields are never overwritten. Then for every event, diffs the `attendees` subcollection against WA registrations (add/update/delete) and refreshes `attendees`, `registrations`, and `incompleteRegistrations` counters. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 300s. |
 | `updateMembers` | Scheduled (daily, 2 AM ET) | Queries only `Active` members whose `renewalDueDate` has passed and flips them to `Lapsed`. Updates chapter aggregates via `FieldValue.increment` — no full member re-read required. |
-| `wildApricotWebhook` | HTTP (POST) | Real-time webhook receiver for Wild Apricot contact, membership, and event changes. Contact/membership changes upsert the member and update chapter aggregates via increments (old/new delta). Event changes: Created = insert-only, Changed = updates WA-owned fields only (preserves app fields), Deleted = soft-delete (`archived: true`). Always returns 200 to prevent WA retry loops. |
+| `wildApricotWebhook` | HTTP (POST) | Real-time webhook receiver for Wild Apricot contact, membership, event, and event-registration changes. Contact/membership changes upsert the member and update chapter aggregates via increments (old/new delta). Event changes: Created = insert-only, Changed = updates WA-owned fields only (preserves app fields), Deleted = soft-delete (`archived: true`). EventRegistration changes upsert / delete the matching `events/{eventId}/attendees/{registrationId}` doc and increment the parent event's `attendees` counter. Always returns 200 to prevent WA retry loops. |
 | `createUser` | Callable | Creates a Firebase Auth user and Firestore user document with role/chapter/region. Restricted to `national_admin` callers. |
 
 ### Webhook Configuration
@@ -428,7 +446,7 @@ Configure in Wild Apricot (Apps > Integrations > Webhooks):
 | Authorization | Secret token (query param) |
 | Token name | `key` |
 | Token value | Value of `WEBHOOK_SECRET` from `functions/.env` |
-| Notification types | Contact, Membership, Event, MembershipRenewed |
+| Notification types | Contact, Membership, MembershipRenewed, Event, EventRegistration |
 
 ### Data Sync Strategy
 
@@ -454,6 +472,18 @@ Soft deletes are used for events, fundraising, and subchapters (no hard deletes 
 
 Members and chapters are **read-only** from the client — only Cloud Functions write to these collections.
 
+### Revenue & payment visibility
+
+Per client requirements, all monetary values associated with events are **gated to `national_admin`** in the UI:
+
+| Surface | Field(s) | Visible to non-national admins |
+|---|---|---|
+| Event detail metrics ([event-metrics.tsx](pnaa/components/events/event-metrics.tsx)) | `totalRevenue` tile | Hidden |
+| Events table ([event-list.tsx](pnaa/components/events/event-list.tsx)) | `totalRevenue` column (and its CSV/XLSX export) | Hidden |
+| Attendee list ([attendee-list.tsx](pnaa/components/events/attendee-list.tsx)) | `paidSum`, `registrationFee` dollar amounts | Hidden — payment column still shows Free / Paid in Full / Unpaid status |
+
+Note: this gating is **UI-only**. The underlying fields remain readable from Firestore by any authenticated user under current security rules. Tighten the rules if server-side enforcement is needed.
+
 ---
 
 ## Data Models
@@ -477,6 +507,7 @@ Members and chapters are **read-only** from the client — only Cloud Functions 
 ### Event
 ```typescript
 {
+  id: string
   name: string
   startDate: string
   endDate: string
@@ -487,16 +518,43 @@ Members and chapters are **read-only** from the client — only Cloud Functions 
   region: string
   about: string
   archived: boolean
+
+  // Metrics
   attendees: number
+  registrations: number
+  incompleteRegistrations: number
+  totalRevenue: number
   volunteers: number
   participantsServed: number
   contactHours: number
   volunteerHours: number
+
+  // Optional subchapter association
+  subchapterId?: string
+
   eventPoster: { name: string; ref: string; downloadURL: string }
   source: "wildapricot" | "app"
   lastUpdatedUser: string
   lastUpdated: Timestamp
   creationDate: Timestamp
+}
+```
+
+### Attendee (subcollection: `events/{eventId}/attendees/{attendeeId}`)
+```typescript
+{
+  registrationId: string
+  eventId: string
+  contactId: string
+  name: string
+  registrationTypeId: string
+  registrationType: string
+  organization: string
+  isPaid: boolean
+  registrationFee: number
+  paidSum: number
+  OnWaitlist: boolean
+  Status: string
 }
 ```
 
@@ -533,9 +591,14 @@ Members and chapters are **read-only** from the client — only Cloud Functions 
 {
   name: string
   chapterId: string
-  createdBy: string
+  chapterName: string
+  region: string
+  description: string
   memberIds: string[]
   archived: boolean
+  createdBy: string
+  lastUpdatedUser: string
+  createdAt: Timestamp
   lastUpdated: Timestamp
 }
 ```
@@ -543,8 +606,12 @@ Members and chapters are **read-only** from the client — only Cloud Functions 
 ### Chapter Alias
 ```typescript
 {
+  id?: string                // Firestore doc id
   aliasName: string          // Alternative WA chapter name
-  canonicalChapterId: string // Maps to chapters/{chapterId}
+  chapterId: string          // Canonical chapter, maps to chapters/{chapterId}
+  createdBy: string
+  createdAt?: Timestamp
+  lastUpdated?: Timestamp
 }
 ```
 

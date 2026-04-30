@@ -6,11 +6,13 @@ import { db } from "@/lib/firebase/config";
 import { AdvancedDataTable, type ColumnDef, type ColumnMeta } from "@/components/shared/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Users } from "lucide-react";
+import { useIsNationalAdmin } from "@/hooks/use-auth";
 import type { Attendee } from "@/types/attendee";
 
 type AttendeeRow = Attendee & { id: string };
 
 export function AttendeeList({ eventId }: { eventId: string }) {
+  const isNationalAdmin = useIsNationalAdmin();
   const [rows, setRows] = useState<AttendeeRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -110,15 +112,19 @@ export function AttendeeList({ eventId }: { eventId: string }) {
             </Badge>
           ) : row.original.isPaid ? (
             <Badge variant="outline" className="text-xs text-green-700 border-green-200 bg-green-50 dark:bg-green-950/30">
-              Paid in Full - ${row.original.paidSum.toFixed(2)}
+              {isNationalAdmin
+                ? `Paid in Full - $${row.original.paidSum.toFixed(2)}`
+                : "Paid in Full"}
             </Badge>
           ) : (
             <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50 dark:bg-amber-950/30">
-              ${(row.original.registrationFee - row.original.paidSum).toFixed(2)} Due
+              {isNationalAdmin
+                ? `$${(row.original.registrationFee - row.original.paidSum).toFixed(2)} Due`
+                : "Unpaid"}
             </Badge>
           ),      },
     ],
-    [registrationNames]
+    [registrationNames, isNationalAdmin]
   );
 
   return (

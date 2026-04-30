@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useIsNationalAdmin } from "@/hooks/use-auth";
 import { formatDate } from "@/lib/utils";
 import type { AppEvent } from "@/types/event";
 
@@ -23,7 +24,7 @@ type EventRow = AppEvent & { id: string };
 
 const STORAGE_KEY = "pnaa-events-view";
 
-const columns: ColumnDef<EventRow, unknown>[] = [
+const baseColumns: ColumnDef<EventRow, unknown>[] = [
   {
     accessorKey: "name",
     header: "Event Name",
@@ -187,10 +188,20 @@ const columns: ColumnDef<EventRow, unknown>[] = [
 
 export function EventList() {
   const router = useRouter();
+  const isNationalAdmin = useIsNationalAdmin();
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("upcoming");
   const [showArchived, setShowArchived] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
+  const columns = useMemo(
+    () =>
+      isNationalAdmin
+        ? baseColumns
+        : baseColumns.filter(
+            (c) => !("accessorKey" in c && c.accessorKey === "totalRevenue")
+          ),
+    [isNationalAdmin]
+  );
   const [view, setView] = useState<ViewMode>(() => {
     if (typeof window !== "undefined") {
       return (localStorage.getItem(STORAGE_KEY) as ViewMode) ?? "table";
