@@ -96,20 +96,48 @@ exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 720 }, async (req
         if (member)
             allMembers.push(member);
     }
-    // Write all members to Firestore in batches of 450
+    // Apply chapter override before diffing so the comparison reflects the
+    // value we'd actually write.
+    for (const m of allMembers) {
+        if (!m.chapterName && m.membershipLevel === "Member-at-Large (1 year)") {
+            m.chapterName = "PNA Member-at-Large";
+        }
+    }
+    // Read existing member docs once so we can skip writes for unchanged rows.
+    // 14k reads is cheaper than 14k writes (3x in $$ and 3.5x in free-tier quota).
+    console.log("syncMembers: reading existing members for diff...");
+    const existingSnap = await db.collection("members").get();
+    const existingMap = new Map();
+    for (const doc of existingSnap.docs)
+        existingMap.set(doc.id, doc.data());
+    // lastSynced changes every run, so it's excluded from the comparison.
+    const COMPARE_FIELDS = [
+        "name",
+        "email",
+        "membershipLevel",
+        "renewalDueDate",
+        "chapterName",
+        "highestEducation",
+        "memberId",
+        "region",
+        "activeStatus",
+    ];
     let batch = db.batch();
     let batchCount = 0;
-    let processed = 0;
+    let written = 0;
+    let skipped = 0;
     for (const memberData of allMembers) {
-        const docRef = db.collection("members").doc(memberData.memberId);
-        // Treat members with no chapter on the Member-at-Large level as the
-        // "PNA Member-at-Large" chapter (mirrors webhook-handler).
-        if (!memberData.chapterName && memberData.membershipLevel === "Member-at-Large (1 year)") {
-            memberData.chapterName = "PNA Member-at-Large";
+        const existing = existingMap.get(memberData.memberId);
+        const changed = !existing ||
+            COMPARE_FIELDS.some((f) => String(existing[f] ?? "") !== String(memberData[f] ?? ""));
+        if (!changed) {
+            skipped++;
+            continue;
         }
+        const docRef = db.collection("members").doc(memberData.memberId);
         batch.set(docRef, memberData, { merge: true });
         batchCount++;
-        processed++;
+        written++;
         if (batchCount === 450) {
             await batch.commit();
             batch = db.batch();
@@ -119,6 +147,7 @@ exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 720 }, async (req
     if (batchCount > 0) {
         await batch.commit();
     }
+    console.log(`syncMembers: ${written} written, ${skipped} unchanged (skipped)`);
     // Aggregate chapters from the in-memory member list (most efficient for a full sync)
     const chapterCounts = {};
     for (const member of allMembers) {
@@ -168,8 +197,8 @@ exports.syncMembers = (0, https_1.onRequest)({ timeoutSeconds: 720 }, async (req
         }, { merge: true });
     }
     await chapterBatch.commit();
-    const msg = `syncMembers: processed ${processed} contacts, ` +
-        `updated ${Object.keys(chapterCounts).length} chapters`;
+    const msg = `syncMembers: ${written} written, ${skipped} unchanged ` +
+        `(${allMembers.length} total), updated ${Object.keys(chapterCounts).length} chapters`;
     console.log(msg);
     res.status(200).send(msg);
 });
