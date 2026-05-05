@@ -97,13 +97,28 @@ const baseColumns: ColumnDef<EventRow, unknown>[] = [
     ),
   },
   {
-    accessorKey: "attendees",
-    header: "Attendees",
+    accessorKey: "registrations",
+    header: "Registered",
+    size: 100,
+    enableSorting: true,
+    cell: ({ row }) => (
+      <span className="tabular-nums text-sm text-muted-foreground">
+        {(row.original.registrations ?? row.original.attendees) > 0
+          ? (row.original.registrations ?? row.original.attendees).toLocaleString()
+          : "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "attendedCount",
+    header: "Attended",
     size: 100,
     enableSorting: true,
     cell: ({ row }) => (
       <span className="tabular-nums text-sm">
-        {row.original.attendees > 0 ? row.original.attendees.toLocaleString() : "—"}
+        {(row.original.attendedCount ?? 0) > 0
+          ? (row.original.attendedCount ?? 0).toLocaleString()
+          : "—"}
       </span>
     ),
   },

@@ -19,12 +19,27 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FileUpload } from "@/components/shared/file-upload";
 import { addDocument, updateDocument } from "@/lib/firebase/firestore";
 import { uploadEventPoster } from "@/lib/firebase/storage";
+import { propagateConferenceDefaultHours } from "@/lib/firebase/attendees";
 import { useAuth } from "@/hooks/use-auth";
 import { Timestamp } from "firebase/firestore";
-import type { AppEvent } from "@/types/event";
+import {
+  EVENT_TYPE_LABELS,
+  EVENT_SUBTYPE_LABELS,
+  SUBTYPES_BY_TYPE,
+  type AppEvent,
+  type EventType,
+  type EventSubtype,
+} from "@/types/event";
 
 const eventSchema = z.object({
   name: z.string().min(1, "Event name is required"),
@@ -36,10 +51,17 @@ const eventSchema = z.object({
   chapter: z.string().min(1, "Chapter is required"),
   region: z.string(),
   about: z.string(),
-  attendees: z.number().min(0),
+  eventType: z.enum(["conference", "community_outreach"]),
+  eventSubtype: z.enum([
+    "in_person",
+    "webinar",
+    "medical_mission",
+    "health_screening",
+    "volunteerism",
+  ]),
+  defaultHours: z.number().min(0),
   volunteers: z.number().min(0),
   participantsServed: z.number().min(0),
-  contactHours: z.number().min(0),
   volunteerHours: z.number().min(0),
   archived: z.boolean(),
 });
@@ -74,18 +96,38 @@ export function EventForm({ event, mode }: EventFormProps) {
       chapter: event?.chapter || chapterFromParams,
       region: event?.region || regionFromParams,
       about: event?.about || "",
-      attendees: event?.attendees || 0,
+      eventType: event?.eventType || "conference",
+      eventSubtype: event?.eventSubtype || "in_person",
+      defaultHours: event?.defaultHours ?? 0,
       volunteers: event?.volunteers || 0,
       participantsServed: event?.participantsServed || 0,
-      contactHours: event?.contactHours || 0,
       volunteerHours: event?.volunteerHours || 0,
       archived: event?.archived || false,
     },
   });
 
+  // Watch type to filter subtype options and label the hours field appropriately.
+  const watchedType = form.watch("eventType") as EventType;
+  const subtypeOptions = SUBTYPES_BY_TYPE[watchedType] ?? [];
+  const hoursLabel =
+    watchedType === "conference"
+      ? "Hours per attendee"
+      : "Default hours (autofilled per attendee)";
+  const hoursDescription =
+    watchedType === "conference"
+      ? "Every attendee marked attended earns this many hours."
+      : "Prefilled for each attendee — admins can override per person.";
+
   const onSubmit = async (values: EventFormValues) => {
     setIsSubmitting(true);
     try {
+      // Snap subtype to a valid option for the chosen type (in case type changed
+      // since the subtype was last picked).
+      const validSubtypes = SUBTYPES_BY_TYPE[values.eventType];
+      const subtype: EventSubtype = validSubtypes.includes(values.eventSubtype)
+        ? values.eventSubtype
+        : validSubtypes[0];
+
       let eventPoster = event?.eventPoster || {
         name: "",
         ref: "",
@@ -94,6 +136,7 @@ export function EventForm({ event, mode }: EventFormProps) {
 
       const eventData = {
         ...values,
+        eventSubtype: subtype,
         location: values.location || "",
         region: values.region || "",
         about: values.about || "",
@@ -108,6 +151,13 @@ export function EventForm({ event, mode }: EventFormProps) {
         const docId = await addDocument("events", {
           ...eventData,
           source: "app" as const,
+          // Counters start at zero on create.
+          attendees: 0,
+          attendedCount: 0,
+          registrations: 0,
+          incompleteRegistrations: 0,
+          totalRevenue: 0,
+          contactHours: 0,
           creationDate: Timestamp.now(),
           ...(subchapterId ? { subchapterId } : {}),
         });
@@ -126,6 +176,20 @@ export function EventForm({ event, mode }: EventFormProps) {
         }
 
         await updateDocument("events", event.id, eventData);
+
+        // For conferences, propagate any defaultHours (or type) change to every
+        // attended attendee — keeps the "live" rule the user asked for.
+        const becameConference = values.eventType === "conference";
+        const hoursChanged = (event.defaultHours ?? 0) !== values.defaultHours;
+        const typeChanged = event.eventType !== values.eventType;
+        if (becameConference && (hoursChanged || typeChanged)) {
+          await propagateConferenceDefaultHours({
+            eventId: event.id,
+            newDefaultHours: values.defaultHours,
+            user: user?.email || "",
+          });
+        }
+
         toast.success("Event updated successfully");
         router.push(`/events/${event.id}`);
       }
@@ -158,6 +222,65 @@ export function EventForm({ event, mode }: EventFormProps) {
                 </FormItem>
               )}
             />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="eventType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Event Type</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={(v) => {
+                        field.onChange(v);
+                        // Reset subtype to the first valid option when type changes.
+                        const next = SUBTYPES_BY_TYPE[v as EventType][0];
+                        form.setValue("eventSubtype", next);
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {(Object.keys(EVENT_TYPE_LABELS) as EventType[]).map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {EVENT_TYPE_LABELS[t]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="eventSubtype"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Subtype</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select subtype" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {subtypeOptions.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {EVENT_SUBTYPE_LABELS[s]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
@@ -292,16 +415,39 @@ export function EventForm({ event, mode }: EventFormProps) {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Metrics</CardTitle>
+            <CardTitle className="text-base">Hours & Metrics</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <FormField
+              control={form.control}
+              name="defaultHours"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{hoursLabel}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      {...field}
+                      onChange={(e) =>
+                        field.onChange(Number(e.target.value) || 0)
+                      }
+                    />
+                  </FormControl>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {hoursDescription}
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {(
                 [
-                  { name: "attendees", label: "Attendees" },
                   { name: "volunteers", label: "Volunteers" },
                   { name: "participantsServed", label: "Participants Served" },
-                  { name: "contactHours", label: "Contact Hours" },
                   { name: "volunteerHours", label: "Volunteer Hours" },
                 ] as const
               ).map((metric) => (

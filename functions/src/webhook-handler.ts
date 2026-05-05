@@ -222,6 +222,8 @@ async function handleEventRegistration(
       const oldPaidSum = Number(existingData.paidSum ?? 0);
       const oldStatus = String(existingData.Status ?? "");
       const wasIncomplete = oldStatus !== "Paid" && oldStatus !== "Free";
+      const wasAttended = Boolean(existingData.attended);
+      const oldHours = Number(existingData.hours ?? 0);
 
       tx.delete(attendeeRef);
       if (eventSnap.exists) {
@@ -230,6 +232,8 @@ async function handleEventRegistration(
           registrations: FieldValue.increment(-1),
           ...(oldPaidSum !== 0 && { totalRevenue: FieldValue.increment(-oldPaidSum) }),
           ...(wasIncomplete && { incompleteRegistrations: FieldValue.increment(-1) }),
+          ...(wasAttended && { attendedCount: FieldValue.increment(-1) }),
+          ...(wasAttended && oldHours !== 0 && { contactHours: FieldValue.increment(-oldHours) }),
           lastUpdated: Timestamp.now(),
           lastUpdatedUser: "WildApricot",
         });
@@ -281,6 +285,15 @@ async function handleEventRegistration(
     Status: registration.Status || webhookStatus || "",
   };
 
+  // Used for true inserts; seeds app-managed fields. Updates use merge:true with
+  // the slim attendeeData above so attended/hours/source/memberId are preserved.
+  const attendeeDataForInsert = {
+    ...attendeeData,
+    source: "wildapricot" as const,
+    attended: false,
+    hours: 0,
+    memberId: attendeeData.contactId,
+  };
 
   const newPaidSum = attendeeData.paidSum;
   const newStatus = attendeeData.Status;
@@ -307,7 +320,7 @@ async function handleEventRegistration(
         await db.collection("pendingRegistrations").doc(registrationId).set({
           eventId,
           registrationId,
-          attendeeData,
+          attendeeData: attendeeDataForInsert,
           retryCount: 0,
           createdAt: Timestamp.now(),
         });
@@ -327,7 +340,7 @@ async function handleEventRegistration(
         tx.set(pendingRef, {
           eventId,
           registrationId,
-          attendeeData,
+          attendeeData: attendeeDataForInsert,
           retryCount: 0,
           createdAt: Timestamp.now(),
         });
@@ -349,7 +362,8 @@ async function handleEventRegistration(
         const revenueDelta = newPaidSum - oldPaidSum;
         const incompleteDelta = (newIsIncomplete ? 1 : 0) - (oldIsIncomplete ? 1 : 0);
 
-        tx.set(attendeeRef, attendeeData);
+        // merge:true preserves attended/hours/source/memberId on the existing doc.
+        tx.set(attendeeRef, attendeeData, { merge: true });
         tx.update(eventRef, {
           ...(revenueDelta !== 0 && { totalRevenue: FieldValue.increment(revenueDelta) }),
           ...(incompleteDelta !== 0 && { incompleteRegistrations: FieldValue.increment(incompleteDelta) }),
@@ -359,7 +373,7 @@ async function handleEventRegistration(
         return { status: "replayed" as const, revenueDelta, incompleteDelta };
       }
 
-      tx.set(attendeeRef, attendeeData);
+      tx.set(attendeeRef, attendeeDataForInsert);
       tx.update(eventRef, {
         attendees: FieldValue.increment(1),
         registrations: FieldValue.increment(1),
@@ -398,7 +412,12 @@ async function handleEventRegistration(
 
     // Always upsert: fetchWARegistration already returned the full payload, so losing
     // this write to preserve orphan-avoidance would drop an out-of-order Changed.
-    tx.set(attendeeRef, attendeeData);
+    // Insert with defaults if the doc is new; merge if it already exists.
+    if (existingAttendee.exists) {
+      tx.set(attendeeRef, attendeeData, { merge: true });
+    } else {
+      tx.set(attendeeRef, attendeeDataForInsert);
+    }
 
     if (!eventSnap.exists) {
       // Registration Changed arrived before the Event Created webhook landed (or the
@@ -409,7 +428,7 @@ async function handleEventRegistration(
       tx.set(pendingRef, {
         eventId,
         registrationId,
-        attendeeData,
+        attendeeData: attendeeDataForInsert,
         retryCount: 0,
         createdAt: Timestamp.now(),
       });
@@ -504,11 +523,16 @@ async function handleEvent(
       chapter: "",
       region: "National",
       archived: false,
+      // WA events default to a National in-person conference; admins can change in the edit form.
+      eventType: "conference",
+      eventSubtype: "in_person",
+      defaultHours: 0,
       about: "",
       startTime: "",
       endTime: "",
       eventPoster: { name: "", ref: "", downloadURL: "" },
       attendees: 0,
+      attendedCount: 0,
       volunteers: 0,
       participantsServed: 0,
       contactHours: 0,

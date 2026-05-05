@@ -11,6 +11,7 @@ import {
   LogOut,
   ChevronLeft,
   Users,
+  UserCircle,
 } from "lucide-react";
 import {
   Sidebar,
@@ -34,6 +35,7 @@ const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Events", href: "/events", icon: Calendar },
   { title: "Chapters", href: "/chapters", icon: Building2 },
+  { title: "Members", href: "/members", icon: UserCircle },
   { title: "Fundraising", href: "/fundraising", icon: DollarSign },
   { title: "About", href: "/about", icon: Info },
 ];

@@ -1,15 +1,25 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, HandHelping, Clock, UserCheck, Heart, CircleDollarSign } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Users,
+  HandHelping,
+  Clock,
+  UserCheck,
+  CircleDollarSign,
+} from "lucide-react";
 import { useIsNationalAdmin } from "@/hooks/use-auth";
 import type { AppEvent } from "@/types/event";
 
 const baseMetricConfig = [
-  { key: "totalRevenue" as const, label: "Total Revenue", icon: CircleDollarSign, nationalAdminOnly: true },
-  { key: "attendees" as const, label: "Attendees", icon: Users },
+  {
+    key: "totalRevenue" as const,
+    label: "Total Revenue",
+    icon: CircleDollarSign,
+    nationalAdminOnly: true,
+  },
+  { key: "attendedCount" as const, label: "Attended", icon: Users },
   { key: "volunteers" as const, label: "Volunteers", icon: HandHelping },
-
   { key: "contactHours" as const, label: "Contact Hours", icon: Clock },
   {
     key: "volunteerHours" as const,
@@ -23,14 +33,14 @@ export function EventMetrics({ event }: { event: AppEvent }) {
   const metricConfig = baseMetricConfig.filter(
     (m) => !m.nationalAdminOnly || isNationalAdmin
   );
-  const hasMetrics = metricConfig.some((m) => event[m.key] > 0);
+  const hasMetrics = metricConfig.some((m) => (event[m.key] ?? 0) > 0);
 
   if (!hasMetrics && event.source === "wildapricot") {
     return (
       <Card>
         <CardContent className="py-6 text-center">
           <p className="text-sm text-muted-foreground">
-            No metrics reported yet — Edit to add event metrics
+            No metrics reported yet — mark attendees as attended to start tracking
           </p>
         </CardContent>
       </Card>
@@ -52,7 +62,8 @@ export function EventMetrics({ event }: { event: AppEvent }) {
               </span>
               <span className="text-xs text-muted-foreground mt-1">
                 {metric.label}
-              </span>            </CardContent>
+              </span>
+            </CardContent>
           </Card>
         ))}
       </div>

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useCollection } from "@/hooks/use-firestore";
+import { useCollectionOnce } from "@/hooks/use-firestore";
 import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
 import { orderBy } from "firebase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
@@ -40,12 +40,15 @@ export function ChapterList() {
     return "table";
   });
 
-  const { data: chapters, loading } = useCollection<Chapter>("chapters", [
+  const { data: chapters, loading } = useCollectionOnce<Chapter>("chapters", [
     orderBy("name", "asc"),
   ]);
 
   // Load all aliases to know which chapter names to hide from the list
-  const { data: allAliases } = useCollection<ChapterAlias>("chapter_aliases", []);
+  const { data: allAliases } = useCollectionOnce<ChapterAlias>(
+    "chapter_aliases",
+    []
+  );
 
   const aliasedNames = useMemo(
     () => new Set((allAliases as (ChapterAlias & { id: string })[]).map((a) => a.aliasName)),
