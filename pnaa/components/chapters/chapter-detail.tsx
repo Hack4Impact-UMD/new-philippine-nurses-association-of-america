@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useDocument, useCollection } from "@/hooks/use-firestore";
+import {
+  useDocument,
+  useCollection,
+  useCollectionOnce,
+} from "@/hooks/use-firestore";
 import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
 import { where, orderBy } from "firebase/firestore";
 import { Card, CardContent } from "@/components/ui/card";
@@ -116,7 +120,7 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
     () => [where("chapterId", "==", chapterId)],
     [chapterId]
   );
-  const { data: aliases } = useCollection<ChapterAlias>(
+  const { data: aliases } = useCollectionOnce<ChapterAlias>(
     "chapter_aliases",
     aliasConstraints
   );
@@ -180,7 +184,7 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
 
   const [showAllMembers, setShowAllMembers] = useState(false);
 
-  const { data: members, loading: membersLoading } = useCollection<Member>(
+  const { data: members, loading: membersLoading } = useCollectionOnce<Member>(
     "members",
     allChapterNames.length > 0 ? memberConstraints : []
   );

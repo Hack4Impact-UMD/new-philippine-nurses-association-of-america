@@ -380,11 +380,15 @@ async function runSyncEvents() {
             chapter: "",
             region: "National",
             archived: false,
+            eventType: "conference",
+            eventSubtype: "in_person",
+            defaultHours: 0,
             about: "",
             startTime: "",
             endTime: "",
             eventPoster: { name: "", ref: "", downloadURL: "" },
             attendees: 0,
+            attendedCount: 0,
             volunteers: 0,
             participantsServed: 0,
             contactHours: 0,
@@ -406,13 +410,113 @@ async function runSyncEvents() {
         await batch.commit();
     console.log(`✓ Events: ${added} added, ${skipped} skipped (already exist)`);
 }
+// ─── Backfill: Event types & Attendee app-managed fields ────────────────────
+/**
+ * One-time backfill for the new event-type / attendance model.
+ *
+ * Events: stamps eventType="conference", eventSubtype="in_person", defaultHours=0,
+ * attendedCount=0 on any event missing those fields.
+ *
+ * Attendees: stamps source="wildapricot", attended=false, hours=0, memberId=contactId
+ * on any attendee subdoc missing those fields. Existing event-level attendees /
+ * contactHours counts are reset to 0 by the event-level pass since no attendees
+ * have been marked attended yet under the new model.
+ *
+ * Idempotent — only writes fields that are missing from each doc.
+ */
+async function runBackfill() {
+    console.log("\n=== Backfilling events & attendees ===");
+    // Pass 1: event docs
+    const eventsSnap = await db.collection("events").get();
+    console.log(`  Scanning ${eventsSnap.size} events...`);
+    let eventBatch = db.batch();
+    let eventBatchCount = 0;
+    let eventsUpdated = 0;
+    const commitEventsIfFull = async () => {
+        if (eventBatchCount >= 450) {
+            await eventBatch.commit();
+            eventBatch = db.batch();
+            eventBatchCount = 0;
+        }
+    };
+    for (const doc of eventsSnap.docs) {
+        const data = doc.data();
+        const updates = {};
+        if (data.eventType === undefined)
+            updates.eventType = "conference";
+        if (data.eventSubtype === undefined)
+            updates.eventSubtype = "in_person";
+        if (data.defaultHours === undefined)
+            updates.defaultHours = 0;
+        if (data.attendedCount === undefined)
+            updates.attendedCount = 0;
+        if (data.contactHours === undefined)
+            updates.contactHours = 0;
+        if (Object.keys(updates).length > 0) {
+            eventBatch.update(doc.ref, updates);
+            eventBatchCount++;
+            eventsUpdated++;
+            await commitEventsIfFull();
+        }
+    }
+    if (eventBatchCount > 0)
+        await eventBatch.commit();
+    console.log(`  ✓ Events: ${eventsUpdated} updated`);
+    // Pass 2: attendee subdocs (collection group)
+    const attendeesSnap = await db.collectionGroup("attendees").get();
+    console.log(`  Scanning ${attendeesSnap.size} attendees...`);
+    let attBatch = db.batch();
+    let attBatchCount = 0;
+    let attendeesUpdated = 0;
+    const commitAttIfFull = async () => {
+        if (attBatchCount >= 450) {
+            await attBatch.commit();
+            attBatch = db.batch();
+            attBatchCount = 0;
+        }
+    };
+    for (const doc of attendeesSnap.docs) {
+        const data = doc.data();
+        const updates = {};
+        if (data.source === undefined)
+            updates.source = "wildapricot";
+        if (data.attended === undefined)
+            updates.attended = false;
+        if (data.hours === undefined)
+            updates.hours = 0;
+        if (data.memberId === undefined)
+            updates.memberId = String(data.contactId ?? "");
+        if (Object.keys(updates).length > 0) {
+            attBatch.update(doc.ref, updates);
+            attBatchCount++;
+            attendeesUpdated++;
+            await commitAttIfFull();
+        }
+    }
+    if (attBatchCount > 0)
+        await attBatch.commit();
+    console.log(`  ✓ Attendees: ${attendeesUpdated} updated`);
+    console.log("\n✓ Backfill complete");
+}
 // ─── Main ────────────────────────────────────────────────────────────────────
 async function main() {
+    const target = process.argv[2]; // "members" | "events" | "backfill" | undefined
+    // Backfill doesn't touch WA at all.
+    if (target === "backfill") {
+        try {
+            await runBackfill();
+            console.log("\nDone.");
+            return;
+        }
+        catch (err) {
+            console.error("Backfill failed:", err);
+            process.exit(1);
+        }
+    }
     if (!WA_API_KEY || !WA_ACCOUNT_ID) {
         console.error("Missing WILD_APRICOT_API_KEY or WILD_APRICOT_ACCOUNT_ID in functions/.env");
         process.exit(1);
     }
-    const target = process.argv[2]; // "members" | "events" | undefined
     const { from, limit } = parseArgs();
     if (from > 0 || limit < Infinity) {
         console.log(`Flags: --from ${from}${limit < Infinity ? ` --limit ${limit}` : ""}`);

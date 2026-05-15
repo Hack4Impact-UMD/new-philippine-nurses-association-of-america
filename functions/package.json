@@ -9,7 +9,8 @@
     "deploy": "firebase deploy --only functions",
     "sync": "npm run build && node lib/run-sync.js",
     "sync:members": "npm run build && node lib/run-sync.js members",
-    "sync:events": "npm run build && node lib/run-sync.js events"
+    "sync:events": "npm run build && node lib/run-sync.js events",
+    "backfill:events": "npm run build && node lib/run-sync.js backfill"
   },
   "engines": {
     "node": "20"

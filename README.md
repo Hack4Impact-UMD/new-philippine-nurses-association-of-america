@@ -1,6 +1,6 @@
 # Philippine Nurses Association of America — Chapter Management System
 
-A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, events, and fundraising campaigns. Built with Next.js and Firebase, integrated with Wild Apricot for membership data.
+A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, events, and fundraising campaigns. Built with Next.js and Firebase, integrated with Wild Apricot for membership data.
 
 ---
 
@@ -16,6 +16,8 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 - [Getting Started](#getting-started)
 - [Firebase Cloud Functions](#firebase-cloud-functions)
 - [Roles & Permissions](#roles--permissions)
+- [Event Types & Hours Tracking](#event-types--hours-tracking)
+- [Read/Write Optimization](#readwrite-optimization)
 - [Data Models](#data-models)
 
 ---
@@ -24,10 +26,11 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 
 - **Dashboard** — Real-time stats (total/active/lapsed members, chapters, upcoming events, total fundraised) plus chapter-list, fundraising-progress, and upcoming-events widgets
 - **Chapter Management** — Browse all chapters, view chapter-level member breakdowns and activity charts; chapter aliases merge stats from alternative Wild Apricot names
-- **Event Management** — Create, edit, and view events with metrics (attendees, registrations, revenue, volunteers, contact hours, etc.); per-event attendee subcollection synced from Wild Apricot; event posters uploaded to Firebase Storage. Revenue figures and attendee payment amounts are visible to national admins only — other roles see paid / unpaid / free status without dollar amounts.
+- **Event Management** — Create, edit, and view events with type/subtype (Conference: In Person / Webinar; Community Outreach: Medical Mission / Health Screening / Volunteerism). Per-event attendee subcollection mixes Wild Apricot registrations with manually-added attendees. Admins toggle attendance and edit per-attendee hours; conferences apply a uniform `defaultHours` to all attended attendees, community outreach prefills it but lets admins override per person. Revenue figures and attendee payment amounts are gated to national admins.
+- **Member Directory** — Paginated `/members` listing with server-side prefix search (≥ 2 chars) and an "Active only" toggle. Per-member detail page shows total hours, events attended, and a breakdown of conference vs. community outreach hours, with a table of every event the member was marked attended on.
 - **Fundraising** — Track fundraising campaigns with amounts, notes, chapter and optional subchapter attribution; campaign trend chart on detail pages
 - **Subchapters** — Create subchapters within chapters, assign members, soft-delete support; events and fundraising can be tagged to a subchapter
-- **Member Sync** — Wild Apricot membership sync via real-time webhooks (Contact / Membership / Event), manual full-sync HTTP endpoints, and a daily 2 AM ET scheduled status recalculation
+- **Member Sync** — Wild Apricot membership sync via real-time webhooks (Contact / Membership / MembershipRenewed / Event / EventRegistration). Manual full-sync HTTP endpoints (`syncMembers` is diff-aware — skips writes for unchanged docs) plus a daily 2 AM ET scheduled status recalculation (`updateMembers`) that only touches expired-renewal rows.
 - **First-Time Onboarding** — New users select their region and chapter on first sign-in; this can only be changed later by a national admin via the user management page
 - **Role-Based Access** — National admins see all data; region admins manage their region; chapter admins manage their chapter; members have read-only access
 - **User Management** — National admins can view all users and update roles, regions, and chapter assignments
@@ -74,13 +77,14 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Next.js App                          │
-│  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐  │
-│  │ Dashboard │  │  Events  │  │ Fundraising│  │ Chapters │  │
-│  └──────────┘  └──────────┘  └────────────┘  └──────────┘  │
-│                     │ Real-time listeners                   │
-└─────────────────────┼───────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                            Next.js App                              │
+│  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ Dashboard │  │ Events │  │ Members │  │ Chapters │  │ Funding  │ │
+│  └──────────┘  └────────┘  └─────────┘  └──────────┘  └──────────┘ │
+│            │ Live listeners on volatile data + one-shot reads on    │
+│            │ slow-changing collections (members, chapters, aliases) │
+└────────────┼────────────────────────────────────────────────────────┘
                       │
         ┌─────────────┴───────────────────┐
         │           Firestore             │
@@ -90,14 +94,14 @@ A full-stack web application for managing PNAA's 55+ chapters, 4,000+ members, e
         │  users / chapter_aliases        │
         └──────────┬──────────────────────┘
                    │
-     ┌─────────────┴──────────────────┐
-     │    Firebase Cloud Functions    │
-     │  • syncMembers  (HTTP, manual) │
-     │  • syncEvents   (HTTP, manual) │
-     │  • updateMembers (daily 2 AM)  │
-     │  • wildApricotWebhook (HTTP)   │
-     │  • createUser (callable)       │
-     └──────────┬─────────────────────┘
+     ┌──────────────┴──────────────────────┐
+     │       Firebase Cloud Functions      │
+     │  • syncMembers     (HTTP, manual)   │
+     │  • syncEvents      (HTTP, manual)   │
+     │  • updateMembers   (cron, daily 2AM)│
+     │  • wildApricotWebhook (HTTP)        │
+     │  • createUser      (callable)       │
+     └──────────┬──────────────────────────┘
                 │ Wild Apricot REST API
      ┌──────────┴──────────────────┐
      │       Wild Apricot          │
@@ -200,6 +204,8 @@ philippine-nurses-association-of-america/
     │       │   ├── new/
     │       │   └── [eventId]/
     │       │       └── edit/
+    │       ├── members/
+    │       │   └── [memberId]/  # Per-member hours rollup + events attended
     │       ├── fundraising/
     │       │   ├── new/
     │       │   └── [fundraisingId]/
@@ -211,15 +217,16 @@ philippine-nurses-association-of-america/
     │   ├── auth/               # OnboardingGuard
     │   ├── layout/             # Header, Sidebar, MobileNav
     │   ├── dashboard/          # Stats cards, chapter list widget, fundraising progress, upcoming events
-    │   ├── events/             # Event list/card/form/detail, attendee list, attendance & metrics charts
+    │   ├── events/             # Event list/card/form/detail, attendee list (paginated WA + manual), metrics & attendance charts
     │   ├── chapters/           # Chapter list/card/detail, aliases manager, activity chart
+    │   ├── members/            # Paginated member list, per-member detail with hours rollup
     │   ├── fundraising/        # Campaign list/card/form/detail, fundraising chart
     │   ├── subchapters/        # Subchapter list/form/detail
     │   ├── users/              # User list with edit dialog
     │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, DataTable, ViewToggle, FileUpload, EmptyState, StatusBadge
     ├── hooks/
     │   ├── use-auth.ts         # Auth helpers (role checks, chapter/region getters)
-    │   ├── use-firestore.ts    # useDocument / useCollection (real-time listeners)
+    │   ├── use-firestore.ts    # useDocument / useCollection (live listeners) + useDocumentOnce / useCollectionOnce (one-shot getDocs)
     │   ├── use-debounce.ts
     │   ├── use-mobile.ts
     │   └── use-sidebar.ts
@@ -231,6 +238,7 @@ philippine-nurses-association-of-america/
     │   │   ├── config.ts       # Client SDK init
     │   │   ├── admin.ts        # Admin SDK (server-side, lazy Proxy pattern)
     │   │   ├── firestore.ts    # Firestore helpers
+    │   │   ├── attendees.ts    # Attendance write helpers (toggle, hours edit, manual add/remove, defaultHours propagation)
     │   │   ├── storage.ts      # Storage helpers
     │   │   └── index.ts
     │   ├── wild-apricot/
@@ -409,6 +417,9 @@ npm run sync:members                      # members only
 npm run sync:events                       # events only
 npm run sync:members -- --from 5000       # start at contact #5000
 npm run sync:members -- --limit 1000      # first 1000 contacts only
+npm run backfill:events                   # one-time stamp of eventType/subtype/defaultHours
+                                          #   and attendee source/attended/hours/memberId.
+                                          #   Idempotent — safe to re-run.
 ```
 
 ### Deploy
@@ -430,10 +441,10 @@ firebase deploy --only functions
 
 | Function | Trigger | Description |
 |---|---|---|
-| `syncMembers` | HTTP (POST, manual) | Full member sync: fetches all contacts from Wild Apricot via async job polling, upserts to `members` collection in batches of 450, rebuilds chapter aggregates. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 540s. |
-| `syncEvents` | HTTP (POST, manual) | Full event sync: fetches all events from Wild Apricot. Event docs are **insert-only** — existing event app fields are never overwritten. Then for every event, diffs the `attendees` subcollection against WA registrations (add/update/delete) and refreshes `attendees`, `registrations`, and `incompleteRegistrations` counters. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 300s. |
+| `syncMembers` | HTTP (POST, manual) | Full member sync: fetches all contacts from Wild Apricot via async job polling, then **diffs against existing Firestore docs and only writes rows where a tracked field changed** (name, email, level, renewal, chapter, education, member ID, region, status). Skipped writes are logged. Rebuilds chapter aggregates from the in-memory contact list. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 720s. |
+| `syncEvents` | HTTP (POST, manual) | Full event sync: fetches all events from Wild Apricot. Event docs are **insert-only** — existing event app fields are never overwritten. Then for every event, diffs the `attendees` subcollection against WA registrations using `set(..., { merge: true })` so admin-managed fields (`attended`, `hours`, `source`, `memberId`) are preserved across syncs. Refreshes `attendees`, `registrations`, `incompleteRegistrations`, `totalRevenue`, and adjusts `attendedCount` / `contactHours` deltas when an attended record is removed by WA. App-source attendees are never deleted by the sync. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 300s. |
 | `updateMembers` | Scheduled (daily, 2 AM ET) | Queries only `Active` members whose `renewalDueDate` has passed and flips them to `Lapsed`. Updates chapter aggregates via `FieldValue.increment` — no full member re-read required. |
-| `wildApricotWebhook` | HTTP (POST) | Real-time webhook receiver for Wild Apricot contact, membership, event, and event-registration changes. Contact/membership changes upsert the member and update chapter aggregates via increments (old/new delta). Event changes: Created = insert-only, Changed = updates WA-owned fields only (preserves app fields), Deleted = soft-delete (`archived: true`). EventRegistration changes upsert / delete the matching `events/{eventId}/attendees/{registrationId}` doc and increment the parent event's `attendees` counter. Always returns 200 to prevent WA retry loops. |
+| `wildApricotWebhook` | HTTP (POST) | Real-time webhook receiver for Wild Apricot contact, membership, event, and event-registration changes. Contact/membership changes upsert the member and update chapter aggregates via increments (old/new delta). Event changes: Created = insert-only with `eventType: "conference"` / `eventSubtype: "in_person"` defaults, Changed = updates WA-owned fields only, Deleted = soft-delete (`archived: true`). EventRegistration changes write the matching `events/{eventId}/attendees/{registrationId}` doc — inserts seed `source: "wildapricot"`, `attended: false`, `hours: 0`, `memberId: contactId`; updates use merge-write to preserve app-managed fields; deletes decrement the parent event's `attendedCount` / `contactHours` if the removed attendee had been marked attended. Always returns 200 to prevent WA retry loops. |
 | `createUser` | Callable | Creates a Firebase Auth user and Firestore user document with role/chapter/region. Restricted to `national_admin` callers. |
 
 ### Webhook Configuration
@@ -450,10 +461,11 @@ Configure in Wild Apricot (Apps > Integrations > Webhooks):
 
 ### Data Sync Strategy
 
-- **Real-time**: The webhook handler processes individual contact/event changes as they happen in Wild Apricot. Chapter aggregates are updated via `FieldValue.increment` using the old/new member delta — no member re-reads required.
-- **Manual full sync**: `syncMembers` and `syncEvents` are HTTP endpoints (no schedule). Trigger them via `POST /syncMembers?key=[WEBHOOK_SECRET]` and `POST /syncEvents?key=[WEBHOOK_SECRET]` when a full re-sync is needed (e.g. after a gap in webhook coverage or initial setup).
-- **Daily status update**: `updateMembers` runs at 2 AM ET, querying only `Active` members with an expired `renewalDueDate`. On a typical day this touches tens to a few hundred documents rather than the full membership, and updates chapter counts via increments.
+- **Real-time**: The webhook handler processes individual contact/event/registration changes as they happen in Wild Apricot. Chapter aggregates are updated via `FieldValue.increment` using the old/new member delta — no member re-reads required.
+- **Manual full sync**: `syncMembers` and `syncEvents` are HTTP endpoints (no schedule). Trigger them via `POST /syncMembers?key=[WEBHOOK_SECRET]` and `POST /syncEvents?key=[WEBHOOK_SECRET]` when a full re-sync is needed (e.g. after a gap in webhook coverage or initial setup). `syncMembers` reads existing docs once, then only writes rows that actually changed — at 14k members this typically writes a few hundred docs rather than 14k.
+- **Daily status update**: `updateMembers` runs at 2 AM ET, querying only `Active` members with an expired `renewalDueDate`. On a typical day this touches tens to a few hundred documents rather than the full membership, and updates chapter counts via increments. **This is the only scheduled function.**
 - **Chapter aggregates**: The webhook and `updateMembers` use incremental updates. `syncMembers` rebuilds aggregates from scratch from the in-memory contact list during a full sync. `recalculateChapterAggregates` in `wa-utils.ts` is available as a manual recovery utility if counts drift.
+- **Backfill**: `npm run backfill:events` (in `functions/`) idempotently stamps `eventType` / `eventSubtype` / `defaultHours` / `attendedCount` on existing event docs and `source` / `attended` / `hours` / `memberId` on existing attendee subdocs. Run once after deploying the type/subtype change.
 
 ---
 
@@ -472,6 +484,8 @@ Soft deletes are used for events, fundraising, and subchapters (no hard deletes 
 
 Members and chapters are **read-only** from the client — only Cloud Functions write to these collections.
 
+The `events/{eventId}/attendees` subcollection is **writeable by admins** so they can mark attendance, edit per-attendee hours, and add/remove manual attendees. Cloud Functions still own all WA-sourced field updates, and use `set(..., { merge: true })` to preserve admin-managed fields.
+
 ### Revenue & payment visibility
 
 Per client requirements, all monetary values associated with events are **gated to `national_admin`** in the UI:
@@ -483,6 +497,64 @@ Per client requirements, all monetary values associated with events are **gated 
 | Attendee list ([attendee-list.tsx](pnaa/components/events/attendee-list.tsx)) | `paidSum`, `registrationFee` dollar amounts | Hidden — payment column still shows Free / Paid in Full / Unpaid status |
 
 Note: this gating is **UI-only**. The underlying fields remain readable from Firestore by any authenticated user under current security rules. Tighten the rules if server-side enforcement is needed.
+
+---
+
+## Event Types & Hours Tracking
+
+Every event has a **type** and **subtype**. The type drives how attendee hours are recorded.
+
+| Type | Subtypes | Hours behavior |
+|---|---|---|
+| **Conference** | In Person, Webinar | All attendees marked attended earn the event's `defaultHours`. Editing `defaultHours` propagates live to every attended attendee (see [propagateConferenceDefaultHours](pnaa/lib/firebase/attendees.ts)). |
+| **Community Outreach** | Medical Mission, Health Screening, Volunteerism | `defaultHours` autofills the field when an attendee is added or marked attended, but admins can override hours per-person. |
+
+Wild Apricot–synced events default to `eventType: "conference"`, `eventSubtype: "in_person"`, `defaultHours: 0`. Admins can change these on the edit form; the subtype dropdown filters its options based on the chosen type.
+
+### Attendees: Wild Apricot vs Manual
+
+The `events/{eventId}/attendees` subcollection holds two kinds of records, distinguished by the `source` field:
+
+- **`source: "wildapricot"`** — Synced from WA event registrations. Doc ID is the WA registration ID. WA-managed fields (`name`, `registrationType`, `Status`, `paidSum`, etc.) are kept fresh by `syncEvents` and the webhook. App-managed fields (`attended`, `hours`) are preserved across syncs via `set(..., { merge: true })`.
+- **`source: "app"`** — Added by an admin from the event detail page. Doc ID is `app-{memberId}` so the same member can't be added twice. Always `attended: true` on creation. Linked to a `members/{memberId}` doc via `memberId`.
+
+The Add Attendee dialog requires the admin to pick from existing members (server-side prefix search, ≥ 2 chars, scoped to active members and optionally to the event's chapter). It refuses to add a member who is already on the event in either section.
+
+### Per-Member Hours Rollup
+
+The `/members/[memberId]` page queries `collectionGroup("attendees")` filtered by `memberId == X && attended == true`, then fetches each unique parent event doc to display:
+
+- Total hours, total events attended
+- Conference hours vs. community outreach hours
+- A table of every event the member attended, with date / type / chapter / hours
+
+Powered by the `(memberId, attended)` collection-group index in [firestore.indexes.json](firestore.indexes.json).
+
+---
+
+## Read/Write Optimization
+
+At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, so the app is deliberately conservative about reads. Strategies in use:
+
+| Technique | Where | Impact |
+|---|---|---|
+| **Server-side cursor pagination** | `/members` listing, event attendee list (WA section) | A `/members` visit reads ~50 docs instead of 14k. A 2000-attendee conference detail page reads ~50 instead of 2000. |
+| **Server-side prefix search** (min 2 chars) | `/members` search bar, AddManualAttendeeDialog member picker | Searches read ≤ 25–50 matching docs, never the full collection. Uses composite indexes on `(activeStatus, name)` and `(activeStatus, chapterName, name)`. |
+| **Lazy-mount dialogs** | `AddManualAttendeeDialog` body | Prevents the dialog's member-search hook from running on every event-detail page load. The hook only fires after the admin opens the dialog. |
+| **One-shot `getDocs`** instead of `onSnapshot` | `/members` lists, chapter list / detail (members + aliases), member detail page | Slow-changing collections don't need live listeners. Saved listener overhead and removed redundant snapshot deliveries. Implemented via `useCollectionOnce` / `useDocumentOnce` in [hooks/use-firestore.ts](pnaa/hooks/use-firestore.ts). |
+| **Optimistic local updates** | Attendee list (toggle attended, edit hours, add/remove manual) | Admin actions update local state immediately; Firestore write happens in the background with rollback on failure. No re-fetch needed after the write. |
+| **Diff-write `syncMembers`** | `functions/src/sync-members.ts` | Reads existing member docs once, then only writes rows whose tracked fields actually changed. At 14k members a full sync typically writes 50–500 docs instead of 14k. |
+| **Active-only filter default** | `/members` listing, member picker | Reduces working set from ~14k to active members (~9–10k typically). |
+
+### Live listeners are kept where freshness matters
+
+- **Event detail / attendee state during admin editing** — uses `getDocs` + optimistic local state (admin needs immediate feedback on their own action).
+- **Dashboard widgets** — live listeners on small aggregate docs (chapters, etc.).
+
+### What's not optimized yet
+
+- Full-text search across members ("smith" finding "John Smith") still requires an external index (Algolia / Typesense). Today only **case-corrected name prefix** searches work.
+- The `/events` listing fetches up to 500 events per visit (capped); not paginated. Acceptable at current event volume but a future concern.
 
 ---
 
@@ -519,14 +591,22 @@ Note: this gating is **UI-only**. The underlying fields remain readable from Fir
   about: string
   archived: boolean
 
-  // Metrics
-  attendees: number
-  registrations: number
-  incompleteRegistrations: number
+  // Type / subtype — drives hours behavior (see "Event Types & Hours Tracking")
+  eventType: "conference" | "community_outreach"
+  eventSubtype:
+    | "in_person" | "webinar"                               // Conference
+    | "medical_mission" | "health_screening" | "volunteerism" // Community Outreach
+  defaultHours: number      // Per-attendee hours value (uniform for conference, prefill for outreach)
+
+  // Metrics — denormalized; maintained by Cloud Functions and the attendee write helpers
+  attendees: number               // WA registration count (legacy name; same as `registrations`)
+  registrations: number           // WA registration count
+  incompleteRegistrations: number // Registrations not yet Paid/Free
+  attendedCount: number           // Number of attendee subdocs with attended === true
+  contactHours: number            // Sum of attendees' hours where attended === true
   totalRevenue: number
   volunteers: number
   participantsServed: number
-  contactHours: number
   volunteerHours: number
 
   // Optional subchapter association
@@ -543,10 +623,19 @@ Note: this gating is **UI-only**. The underlying fields remain readable from Fir
 ### Attendee (subcollection: `events/{eventId}/attendees/{attendeeId}`)
 ```typescript
 {
+  // Doc ID is `registrationId` for WA records, `app-{memberId}` for manual records.
   registrationId: string
   eventId: string
   contactId: string
   name: string
+
+  // App-managed (admins toggle these from the event detail page)
+  attended: boolean
+  hours: number
+  source: "wildapricot" | "app"
+  memberId: string          // Always set; mirrors contactId for WA, the picked member for app records
+
+  // WA-only (empty/zero for source: "app")
   registrationTypeId: string
   registrationType: string
   organization: string

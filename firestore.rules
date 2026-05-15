@@ -45,10 +45,13 @@ service cloud.firestore {
       allow update: if isAuthenticated() && isAdmin();
       allow delete: if false; // Soft delete only
 
-      // Attendees subcollection: read for authed users
+      // Attendees subcollection: read for authed users; admins can mark
+      // attendance, edit hours, and add/remove manual attendees. WA-synced
+      // records are also written by Cloud Functions via the Admin SDK
+      // regardless of these rules.
       match /attendees/{attendeeId} {
         allow read: if isAuthenticated();
-        allow write: if false;
+        allow create, update, delete: if isAuthenticated() && isAdmin();
       }
     }
 

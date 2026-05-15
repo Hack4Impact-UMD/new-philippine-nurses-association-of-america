@@ -59,6 +59,23 @@
       ]
     },
     {
+      "collectionGroup": "members",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "activeStatus", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "members",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "activeStatus", "order": "ASCENDING" },
+        { "fieldPath": "chapterName", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "subchapters",
       "queryScope": "COLLECTION",
       "fields": [
@@ -83,6 +100,14 @@
         { "fieldPath": "subchapterId", "order": "ASCENDING" },
         { "fieldPath": "archived", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "attendees",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "attended", "order": "ASCENDING" }
       ]
     }
   ],

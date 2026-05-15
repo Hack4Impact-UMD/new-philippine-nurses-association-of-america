@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useDocument } from "@/hooks/use-firestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EventMetrics } from "./event-metrics";
@@ -11,7 +12,11 @@ import { AttendeeList } from "./attendee-list";
 import { formatDateRange } from "@/lib/utils";
 import { Pencil, Calendar, MapPin, Clock, Building2 } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-auth";
-import type { AppEvent } from "@/types/event";
+import {
+  EVENT_TYPE_LABELS,
+  EVENT_SUBTYPE_LABELS,
+  type AppEvent,
+} from "@/types/event";
 
 export function EventDetail({ eventId }: { eventId: string }) {
   const { data: event, loading } = useDocument<AppEvent>("events", eventId);
@@ -43,12 +48,20 @@ export function EventDetail({ eventId }: { eventId: string }) {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold">{event.name}</h1>
             <StatusBadge
               variant={event.source === "wildapricot" ? "wildapricot" : "app"}
             />
             {event.archived && <StatusBadge variant="archived" />}
+            {event.eventType && (
+              <Badge variant="secondary" className="text-xs">
+                {EVENT_TYPE_LABELS[event.eventType]}
+                {event.eventSubtype
+                  ? ` · ${EVENT_SUBTYPE_LABELS[event.eventSubtype]}`
+                  : ""}
+              </Badge>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
@@ -120,7 +133,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
           <CardTitle className="text-base">Attendees</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <AttendeeList eventId={eventId} />
+          <AttendeeList event={event} />
         </CardContent>
       </Card>
     </div>

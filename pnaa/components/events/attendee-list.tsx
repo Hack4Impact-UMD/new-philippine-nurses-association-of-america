@@ -1,65 +1,314 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { collection, query, getDocs } from "firebase/firestore";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  collection,
+  getDocs,
+  limit as fsLimit,
+  orderBy,
+  query,
+  startAfter,
+  where,
+  type DocumentSnapshot,
+  type QueryConstraint,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
-import { AdvancedDataTable, type ColumnDef, type ColumnMeta } from "@/components/shared/advanced-data-table";
+import {
+  AdvancedDataTable,
+  type ColumnDef,
+  type ColumnMeta,
+} from "@/components/shared/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
-import { Users } from "lucide-react";
-import { useIsNationalAdmin } from "@/hooks/use-auth";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { SearchInput } from "@/components/shared/search-input";
+import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { toast } from "sonner";
+import { useAuth, useIsAdmin, useIsNationalAdmin } from "@/hooks/use-auth";
+import { useDebounce } from "@/hooks/use-debounce";
+import {
+  setAttendance,
+  setAttendeeHours,
+  addManualAttendee,
+  removeManualAttendee,
+} from "@/lib/firebase/attendees";
 import type { Attendee } from "@/types/attendee";
+import type { AppEvent } from "@/types/event";
+import type { Member } from "@/types/member";
 
 type AttendeeRow = Attendee & { id: string };
 
-export function AttendeeList({ eventId }: { eventId: string }) {
+const WA_PAGE_SIZE = 50;
+// Title-case a search prefix to match how WA stores names ("First Last").
+const titleCase = (s: string) =>
+  s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+
+export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
+  const { user } = useAuth();
+  const isAdmin = useIsAdmin();
   const isNationalAdmin = useIsNationalAdmin();
-  const [rows, setRows] = useState<AttendeeRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
+
+  // ─── WA registrations: paginated server-side ───────────────────────────
+  const [waRows, setWaRows] = useState<AttendeeRow[]>([]);
+  const [waLoading, setWaLoading] = useState(true);
+  const [waPage, setWaPage] = useState(0);
+  // cursors[i] is the startAfter cursor used to fetch page i. cursors[0] is null.
+  const [waCursors, setWaCursors] = useState<(DocumentSnapshot | null)[]>([null]);
+  const [waHasMore, setWaHasMore] = useState(false);
+  const [waSearch, setWaSearch] = useState("");
+  const debouncedWaSearch = useDebounce(waSearch, 300);
+
+  // Reset pagination when the search changes.
+  useEffect(() => {
+    setWaPage(0);
+    setWaCursors([null]);
+  }, [debouncedWaSearch]);
 
   useEffect(() => {
-    // Per-run flag: check if cancelled before setting state,
     let cancelled = false;
-    setLoading(true);
+    setWaLoading(true);
 
-    getDocs(query(collection(db, "events", eventId, "attendees")))
-      .then((snapshot) => {
+    const startCursor = waCursors[waPage] ?? null;
+    const constraints: QueryConstraint[] = [where("source", "==", "wildapricot")];
+    if (debouncedWaSearch.trim().length >= 2) {
+      const prefix = titleCase(debouncedWaSearch.trim());
+      constraints.push(where("name", ">=", prefix));
+      constraints.push(where("name", "<", prefix + ""));
+    }
+    constraints.push(orderBy("name"));
+    if (startCursor) constraints.push(startAfter(startCursor));
+    constraints.push(fsLimit(WA_PAGE_SIZE + 1)); // +1 to detect more
+
+    getDocs(query(collection(db, "events", event.id, "attendees"), ...constraints))
+      .then((snap) => {
         if (cancelled) return;
-        setRows(snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as AttendeeRow));
+        const docs = snap.docs;
+        const hasMore = docs.length > WA_PAGE_SIZE;
+        const pageDocs = hasMore ? docs.slice(0, WA_PAGE_SIZE) : docs;
+        setWaRows(
+          pageDocs.map((d) => ({ ...(d.data() as Attendee), id: d.id }))
+        );
+        setWaHasMore(hasMore);
+        // Stash next-page cursor if we don't have it yet.
+        if (hasMore) {
+          const nextCursor = pageDocs[pageDocs.length - 1];
+          setWaCursors((prev) => {
+            if (prev[waPage + 1] === nextCursor) return prev;
+            const next = [...prev];
+            next[waPage + 1] = nextCursor;
+            return next;
+          });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Failed to load WA attendees", err);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setWaLoading(false);
       });
 
-    return () => { cancelled = true; };
-  }, [eventId]);
-
-  // Sort: largest paid first, then free, then unpaid
-  const sortedRows = useMemo(() => {
-    const sortKey = (row: AttendeeRow) => {
-      if (row.registrationFee === 0) return 1_000_000;   // free: middle
-      if (row.isPaid) return -row.paidSum;                // paid: higher amount sorts first
-      return 2_000_000;                                   // unpaid: last
+    return () => {
+      cancelled = true;
     };
-    return [...rows].sort((a, b) => sortKey(a) - sortKey(b));
-  }, [rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event.id, waPage, debouncedWaSearch]);
 
-  // Map registrationId -> name for resolving attendee names
-  const registrationNames = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of rows) {
-      map.set(row.registrationId, row.name);
+  // ─── Manual attendees: small set, one-shot ─────────────────────────────
+  const [manualRows, setManualRows] = useState<AttendeeRow[]>([]);
+  const [manualLoading, setManualLoading] = useState(true);
+
+  const loadManual = useCallback(async () => {
+    setManualLoading(true);
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "events", event.id, "attendees"),
+          where("source", "==", "app"),
+          orderBy("name")
+        )
+      );
+      setManualRows(
+        snap.docs.map((d) => ({ ...(d.data() as Attendee), id: d.id }))
+      );
+    } finally {
+      setManualLoading(false);
     }
-    return map;
-  }, [rows]);
+  }, [event.id]);
 
-  const columns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
+  useEffect(() => {
+    loadManual();
+  }, [loadManual]);
+
+  // Optimistic local-state mutators — avoid extra reads after admin actions.
+  const patchWaRow = (id: string, patch: Partial<AttendeeRow>) =>
+    setWaRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const patchManualRow = (id: string, patch: Partial<AttendeeRow>) =>
+    setManualRows((rows) =>
+      rows.map((r) => (r.id === id ? { ...r, ...patch } : r))
+    );
+
+  const computeNextHours = (row: AttendeeRow, attended: boolean): number => {
+    if (!attended) return 0;
+    if (event.eventType === "conference") return event.defaultHours ?? 0;
+    return (row.hours ?? 0) > 0 ? row.hours : event.defaultHours ?? 0;
+  };
+
+  const handleToggleAttended = async (
+    row: AttendeeRow,
+    attended: boolean
+  ) => {
+    const newHours = computeNextHours(row, attended);
+    const patch = { attended, hours: newHours };
+    if (row.source === "app") patchManualRow(row.id, patch);
+    else patchWaRow(row.id, patch);
+    try {
+      await setAttendance({
+        eventId: event.id,
+        attendee: row,
+        attended,
+        eventType: event.eventType,
+        eventDefaultHours: event.defaultHours ?? 0,
+        user: user?.email || "",
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update attendance");
+      // Roll back optimistic update.
+      const rollback = { attended: row.attended, hours: row.hours };
+      if (row.source === "app") patchManualRow(row.id, rollback);
+      else patchWaRow(row.id, rollback);
+    }
+  };
+
+  const handleHoursChange = async (row: AttendeeRow, newHours: number) => {
+    const patch = { hours: newHours };
+    if (row.source === "app") patchManualRow(row.id, patch);
+    else patchWaRow(row.id, patch);
+    try {
+      await setAttendeeHours({
+        eventId: event.id,
+        attendee: row,
+        newHours,
+        user: user?.email || "",
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update hours");
+      const rollback = { hours: row.hours };
+      if (row.source === "app") patchManualRow(row.id, rollback);
+      else patchWaRow(row.id, rollback);
+    }
+  };
+
+  const handleRemoveManual = async (row: AttendeeRow) => {
+    if (!confirm(`Remove ${row.name} from this event?`)) return;
+    setManualRows((rows) => rows.filter((r) => r.id !== row.id));
+    try {
+      await removeManualAttendee({
+        eventId: event.id,
+        attendee: row,
+        user: user?.email || "",
+      });
+      toast.success("Attendee removed");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to remove attendee");
+      // Re-fetch manual rows to recover state.
+      await loadManual();
+    }
+  };
+
+  // Columns shared between WA and manual sections.
+  const attendanceColumn: ColumnDef<AttendeeRow, unknown> = useMemo(
+    () => ({
+      id: "attended",
+      header: "Attended",
+      size: 100,
+      enableSorting: true,
+      accessorFn: (row) => (row.attended ? 1 : 0),
+      cell: ({ row }) =>
+        isAdmin ? (
+          <Switch
+            checked={row.original.attended}
+            onCheckedChange={(v) => handleToggleAttended(row.original, v)}
+            aria-label="Mark attended"
+          />
+        ) : row.original.attended ? (
+          <Badge
+            variant="outline"
+            className="text-xs text-green-700 border-green-200 bg-green-50 dark:bg-green-950/30"
+          >
+            Yes
+          </Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    }),
+    [isAdmin, event.eventType, event.defaultHours, user?.email]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  );
+
+  const hoursColumn: ColumnDef<AttendeeRow, unknown> = useMemo(
+    () => ({
+      id: "hours",
+      header: "Hours",
+      size: 110,
+      enableSorting: true,
+      accessorFn: (row) => row.hours ?? 0,
+      cell: ({ row }) => {
+        const r = row.original;
+        if (event.eventType === "conference") {
+          return (
+            <span className="tabular-nums text-sm">
+              {r.attended ? r.hours : "—"}
+            </span>
+          );
+        }
+        if (!r.attended) {
+          return <span className="text-sm text-muted-foreground">—</span>;
+        }
+        if (!isAdmin) {
+          return <span className="tabular-nums text-sm">{r.hours}</span>;
+        }
+        return (
+          <Input
+            type="number"
+            min={0}
+            step="0.5"
+            defaultValue={r.hours}
+            className="h-8 w-20 text-sm"
+            onBlur={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v) && v !== r.hours) {
+                handleHoursChange(r, v);
+              }
+            }}
+          />
+        );
+      },
+    }),
+    [isAdmin, event.eventType, user?.email]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  );
+
+  const waColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
     () => [
       {
         accessorKey: "name",
         header: "Name",
         size: 200,
         enableSorting: true,
-        meta: { filterType: "text" } satisfies ColumnMeta,
         cell: ({ row }) => (
           <a
             href={`https://mypnaa.org/admin/contacts/details/?contactId=${row.original.contactId}`}
@@ -99,7 +348,6 @@ export function AttendeeList({ eventId }: { eventId: string }) {
             { label: "No", value: "false" },
           ],
         } satisfies ColumnMeta,
-        //orders rows by: free first, then paid (sorted by amount), then unpaid last
         accessorFn: (row) => {
           if (row.registrationFee === 0) return 1_000_000;
           if (row.isPaid) return -row.paidSum;
@@ -107,36 +355,491 @@ export function AttendeeList({ eventId }: { eventId: string }) {
         },
         cell: ({ row }) =>
           row.original.registrationFee === 0 ? (
-            <Badge variant="outline" className="text-xs text-muted-foreground border-muted bg-muted/50">
+            <Badge
+              variant="outline"
+              className="text-xs text-muted-foreground border-muted bg-muted/50"
+            >
               Free
             </Badge>
           ) : row.original.isPaid ? (
-            <Badge variant="outline" className="text-xs text-green-700 border-green-200 bg-green-50 dark:bg-green-950/30">
+            <Badge
+              variant="outline"
+              className="text-xs text-green-700 border-green-200 bg-green-50 dark:bg-green-950/30"
+            >
               {isNationalAdmin
                 ? `Paid in Full - $${row.original.paidSum.toFixed(2)}`
                 : "Paid in Full"}
             </Badge>
           ) : (
-            <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50 dark:bg-amber-950/30">
+            <Badge
+              variant="outline"
+              className="text-xs text-amber-700 border-amber-200 bg-amber-50 dark:bg-amber-950/30"
+            >
               {isNationalAdmin
                 ? `$${(row.original.registrationFee - row.original.paidSum).toFixed(2)} Due`
                 : "Unpaid"}
             </Badge>
-          ),      },
+          ),
+      },
+      attendanceColumn,
+      hoursColumn,
     ],
-    [registrationNames, isNationalAdmin]
+    [isNationalAdmin, attendanceColumn, hoursColumn]
   );
 
+  const manualColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Name",
+        size: 220,
+        enableSorting: true,
+        meta: { filterType: "text" } satisfies ColumnMeta,
+        cell: ({ row }) => (
+          <span className="font-medium text-sm">
+            {row.original.name || "—"}
+          </span>
+        ),
+      },
+      attendanceColumn,
+      hoursColumn,
+      ...(isAdmin
+        ? [
+            {
+              id: "actions",
+              header: "",
+              size: 60,
+              enableSorting: false,
+              cell: ({ row }: { row: { original: AttendeeRow } }) => (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveManual(row.original);
+                  }}
+                  aria-label="Remove attendee"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              ),
+            } as ColumnDef<AttendeeRow, unknown>,
+          ]
+        : []),
+    ],
+    [isAdmin, attendanceColumn, hoursColumn]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  );
+
+  const totalRegistered = event.registrations ?? event.attendees ?? 0;
+  const existingMemberIds = useMemo(
+    () => new Set([...waRows, ...manualRows].map((r) => r.memberId).filter(Boolean)),
+    [waRows, manualRows]
+  );
+
+  const onManualAdded = (newRow: AttendeeRow) => {
+    setManualRows((rows) =>
+      [...rows, newRow].sort((a, b) => a.name.localeCompare(b.name))
+    );
+  };
+
   return (
-    <AdvancedDataTable<AttendeeRow>
-      columns={columns}
-      data={sortedRows}
-      loading={loading}
-      emptyTitle="No attendees"
-      emptyDescription="No registrations found for this event"
-      emptyIcon={Users}
-      defaultPageSize={15}
-      exportFilename={`PNAA_${eventId}_attendees`}
-    />
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h3 className="text-sm font-semibold">
+            Wild Apricot Registrations
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {totalRegistered.toLocaleString()} total
+            </span>
+          </h3>
+          <SearchInput
+            value={waSearch}
+            onChange={setWaSearch}
+            placeholder="Search by name..."
+            className="w-full sm:max-w-xs"
+          />
+        </div>
+        <AdvancedDataTable<AttendeeRow>
+          columns={waColumns}
+          data={waRows}
+          loading={waLoading}
+          emptyTitle={
+            debouncedWaSearch.trim().length >= 2
+              ? "No matching registrations"
+              : "No registrations"
+          }
+          emptyDescription={
+            debouncedWaSearch.trim().length >= 2
+              ? "Try a different search prefix"
+              : "No Wild Apricot registrations for this event"
+          }
+          emptyIcon={Users}
+          defaultPageSize={WA_PAGE_SIZE}
+          exportFilename={`PNAA_${event.id}_registrations`}
+        />
+        <WaPaginator
+          page={waPage}
+          hasMore={waHasMore}
+          loading={waLoading}
+          rowCount={waRows.length}
+          onPrev={() => setWaPage((p) => Math.max(0, p - 1))}
+          onNext={() => setWaPage((p) => p + 1)}
+        />
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">
+            Manually Added Attendees
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {manualRows.length}
+            </span>
+          </h3>
+          {isAdmin && (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <UserPlus className="h-4 w-4 mr-1.5" />
+              Add Attendee
+            </Button>
+          )}
+        </div>
+        <AdvancedDataTable<AttendeeRow>
+          columns={manualColumns}
+          data={manualRows}
+          loading={manualLoading}
+          emptyTitle="No manual attendees"
+          emptyDescription={
+            isAdmin
+              ? "Click 'Add Attendee' to record a member who attended"
+              : "No additional attendees recorded"
+          }
+          emptyIcon={UserPlus}
+          defaultPageSize={15}
+          exportFilename={`PNAA_${event.id}_manual_attendees`}
+        />
+      </section>
+
+      {isAdmin && (
+        <AddManualAttendeeDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          event={event}
+          existingMemberIds={existingMemberIds}
+          onAdded={onManualAdded}
+        />
+      )}
+    </div>
+  );
+}
+
+function WaPaginator({
+  page,
+  hasMore,
+  loading,
+  rowCount,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  hasMore: boolean;
+  loading: boolean;
+  rowCount: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  if (rowCount === 0 && page === 0) return null;
+  return (
+    <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+      <span className="tabular-nums">Page {page + 1}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2"
+        onClick={onPrev}
+        disabled={page === 0 || loading}
+        aria-label="Previous page"
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2"
+        onClick={onNext}
+        disabled={!hasMore || loading}
+        aria-label="Next page"
+      >
+        <ChevronRight className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+// Outer dialog defers all heavy work to the body component, which only mounts
+// while `open` is true. This avoids the member-search hook running on every
+// event-detail page load.
+function AddManualAttendeeDialog({
+  open,
+  onOpenChange,
+  event,
+  existingMemberIds,
+  onAdded,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  event: AppEvent & { id: string };
+  existingMemberIds: Set<string>;
+  onAdded: (row: AttendeeRow) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        {open && (
+          <AddManualAttendeeDialogBody
+            event={event}
+            existingMemberIds={existingMemberIds}
+            onAdded={onAdded}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddManualAttendeeDialogBody({
+  event,
+  existingMemberIds,
+  onAdded,
+  onClose,
+}: {
+  event: AppEvent & { id: string };
+  existingMemberIds: Set<string>;
+  onAdded: (row: AttendeeRow) => void;
+  onClose: () => void;
+}) {
+  const { user } = useAuth();
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
+  const [scopeChapter, setScopeChapter] = useState<boolean>(
+    Boolean(event.chapter)
+  );
+  const [results, setResults] = useState<(Member & { id: string })[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<(Member & { id: string }) | null>(
+    null
+  );
+  const [hours, setHours] = useState<number>(event.defaultHours ?? 0);
+  const [submitting, setSubmitting] = useState(false);
+
+  const trimmed = debouncedSearch.trim();
+  const minSearch = 2;
+
+  // Fire a server-side prefix query only once we have ≥ 2 chars. Filters to
+  // active members, optionally scoped to the event's chapter to keep result
+  // sets small. Limited to 25 hits.
+  useEffect(() => {
+    let cancelled = false;
+    if (trimmed.length < minSearch) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const prefix = titleCase(trimmed);
+    const constraints: QueryConstraint[] = [where("activeStatus", "==", "Active")];
+    if (scopeChapter && event.chapter) {
+      constraints.push(where("chapterName", "==", event.chapter));
+    }
+    constraints.push(where("name", ">=", prefix));
+    constraints.push(where("name", "<", prefix + ""));
+    constraints.push(orderBy("name"));
+    constraints.push(fsLimit(25));
+
+    getDocs(query(collection(db, "members"), ...constraints))
+      .then((snap) => {
+        if (cancelled) return;
+        setResults(
+          snap.docs.map((d) => ({ ...(d.data() as Member), id: d.id }))
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Member search failed", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [trimmed, scopeChapter, event.chapter]);
+
+  const isConference = event.eventType === "conference";
+  const effectiveHours = isConference ? (event.defaultHours ?? 0) : hours;
+
+  const submit = async () => {
+    if (!selected) return;
+    setSubmitting(true);
+    try {
+      await addManualAttendee({
+        eventId: event.id,
+        member: selected,
+        hours: effectiveHours,
+        user: user?.email || "",
+      });
+      // Mirror the doc that addManualAttendee just wrote so the parent list
+      // updates without a re-fetch.
+      onAdded({
+        id: `app-${selected.id}`,
+        registrationId: `app-${selected.id}`,
+        eventId: event.id,
+        contactId: selected.id,
+        name: selected.name,
+        attended: true,
+        hours: effectiveHours,
+        source: "app",
+        memberId: selected.id,
+        registrationTypeId: "",
+        registrationType: "",
+        organization: "",
+        isPaid: false,
+        registrationFee: 0,
+        paidSum: 0,
+        OnWaitlist: false,
+        Status: "",
+      });
+      toast.success(`${selected.name} added`);
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to add attendee";
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Add Attendee</DialogTitle>
+        <DialogDescription>
+          Search active members by name. Type at least {minSearch} letters.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-4">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder={`Search by name (≥ ${minSearch} chars)…`}
+          className="w-full"
+        />
+
+        {event.chapter && (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={scopeChapter}
+              onChange={(e) => setScopeChapter(e.target.checked)}
+              className="rounded border-input"
+            />
+            Limit to {event.chapter}
+          </label>
+        )}
+
+        {selected ? (
+          <div className="rounded-md border p-3 flex items-center justify-between bg-muted/40">
+            <div>
+              <p className="font-medium text-sm">{selected.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {selected.email} · {selected.chapterName || "No chapter"}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelected(null)}
+            >
+              Change
+            </Button>
+          </div>
+        ) : trimmed.length < minSearch ? (
+          <p className="text-sm text-muted-foreground">
+            Type at least {minSearch} letters to search.
+          </p>
+        ) : (
+          <ScrollArea className="h-64 rounded-md border">
+            {loading ? (
+              <p className="text-sm text-muted-foreground p-3">Loading…</p>
+            ) : results.length === 0 ? (
+              <p className="text-sm text-muted-foreground p-3">
+                No active members match.
+              </p>
+            ) : (
+              <ul className="divide-y">
+                {results.map((m) => {
+                  const alreadyAdded = existingMemberIds.has(m.id);
+                  return (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        disabled={alreadyAdded}
+                        onClick={() => setSelected(m)}
+                        className="w-full text-left p-3 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-medium text-sm">{m.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {m.email} · {m.chapterName || "No chapter"}
+                          </p>
+                        </div>
+                        {alreadyAdded && (
+                          <span className="text-xs text-muted-foreground">
+                            already added
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </ScrollArea>
+        )}
+
+        {selected && (
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Hours</label>
+            {isConference ? (
+              <p className="text-sm text-muted-foreground">
+                Conferences use the event's default hours:{" "}
+                <span className="font-medium text-foreground">
+                  {event.defaultHours ?? 0}
+                </span>
+              </p>
+            ) : (
+              <Input
+                type="number"
+                min={0}
+                step="0.5"
+                value={hours}
+                onChange={(e) => setHours(Number(e.target.value) || 0)}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={submit} disabled={!selected || submitting}>
+          {submitting ? "Adding…" : "Add Attendee"}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }

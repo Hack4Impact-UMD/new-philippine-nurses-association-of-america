@@ -101,6 +101,10 @@ export const syncEvents = onRequest(
         chapter: "",
         region: "National",
         archived: false,
+        // WA events default to a National in-person conference; admins can change in the edit form.
+        eventType: "conference",
+        eventSubtype: "in_person",
+        defaultHours: 0,
         about: "",
         startTime: "",
         endTime: "",
@@ -108,6 +112,7 @@ export const syncEvents = onRequest(
         attendees: 0,
         incompleteRegistrations: 0,
         registrations: 0,
+        attendedCount: 0,
         volunteers: 0,
         participantsServed: 0,
         contactHours: 0,
@@ -266,6 +271,10 @@ export const syncEvents = onRequest(
       let added = 0;
       let updated = 0;
       let deleted = 0;
+      // Deltas to apply to event-level attended/hours when WA records that were
+      // marked attended get removed by this sync.
+      let attendedDelta = 0;
+      let hoursDelta = 0;
 
       const commitIfFull = async () => {
         if (eventBatchCount >= 450) {
@@ -275,16 +284,28 @@ export const syncEvents = onRequest(
         }
       };
 
-      // Diff attendees: add new, update changed, delete removed
+      // Diff attendees: add new, update changed, delete removed.
+      // Writes use merge:true so the app-managed fields (attended, hours, source, memberId)
+      // are preserved when WA re-syncs an existing registration.
       for (const [id, incoming] of waRegs) {
         const existing = attendeeMap.get(id);
         if (!existing) {
-          eventBatch.set(eventRef.collection("attendees").doc(id), incoming);
+          // New WA registration — seed app-managed defaults alongside WA fields.
+          eventBatch.set(eventRef.collection("attendees").doc(id), {
+            ...incoming,
+            source: "wildapricot",
+            attended: false,
+            hours: 0,
+            memberId: incoming.contactId,
+          });
           eventBatchCount++;
           added++;
-        } else if (FIELDS_TO_COMPARE.some((f) => incoming[f] !== existing[f]
-          )) {
-          eventBatch.set(eventRef.collection("attendees").doc(id), incoming);
+        } else if (FIELDS_TO_COMPARE.some((f) => incoming[f] !== existing[f])) {
+          eventBatch.set(
+            eventRef.collection("attendees").doc(id),
+            incoming,
+            { merge: true }
+          );
           eventBatchCount++;
           updated++;
         }
@@ -292,9 +313,15 @@ export const syncEvents = onRequest(
       }
 
       // Deletions: if an existing attendee's registrationId is not in the WA data,
-      // it means it was deleted in WA and should be deleted in Firestore
-      for (const [id] of attendeeMap) {
+      // it means it was deleted in WA and should be deleted in Firestore.
+      // App-source records are not in WA — never delete them here.
+      for (const [id, existing] of attendeeMap) {
+        if (existing.source === "app") continue;
         if (!waRegs.has(id)) {
+          if (existing.attended) {
+            attendedDelta -= 1;
+            hoursDelta -= Number(existing.hours ?? 0);
+          }
           eventBatch.delete(eventRef.collection("attendees").doc(id));
           eventBatchCount++;
           deleted++;
@@ -302,12 +329,16 @@ export const syncEvents = onRequest(
         }
       }
 
-      // Update event-level counts and release sync lock
+      // Update event-level counts and release sync lock.
+      // attendedCount and contactHours are app-managed, but we still apply deltas
+      // when the diff above removed attended records.
       eventBatch.update(eventRef, {
         registrations: waRegs.size,
         attendees: waRegs.size,
         incompleteRegistrations: eventIncomplete,
         totalRevenue: totalRevenue,
+        ...(attendedDelta !== 0 && { attendedCount: FieldValue.increment(attendedDelta) }),
+        ...(hoursDelta !== 0 && { contactHours: FieldValue.increment(hoursDelta) }),
         syncLock: FieldValue.delete(),
         lastUpdated: Timestamp.now(),
         lastUpdatedUser: "WildApricot",
