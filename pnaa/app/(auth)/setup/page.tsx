@@ -22,7 +22,8 @@ export default function SetupPage() {
     useCollection<Chapter>("chapters");
 
   const [region, setRegion] = useState("");
-  const [chapterId, setChapterName] = useState("");
+  const [chapterId, setChapterId] = useState("");
+  type ChapterRow = Chapter & { id: string };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +55,7 @@ export default function SetupPage() {
 
   const handleRegionChange = (value: string) => {
     setRegion(value);
-    setChapterName("");
+    setChapterId("");
   };
 
   const handleSubmit = async () => {
@@ -131,13 +132,13 @@ export default function SetupPage() {
           {region && (
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
-              <Select value={chapterId} onValueChange={setChapterName}>
+              <Select value={chapterId} onValueChange={setChapterId}>
                 <SelectTrigger id="chapter" className="w-full">
                   <SelectValue placeholder="Select your chapter..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {filteredChapters.map((c) => (
-                    <SelectItem key={c.name} value={c.name}>
+                  {(filteredChapters as ChapterRow[]).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
                       {c.name}
                     </SelectItem>
                   ))}

@@ -14,7 +14,11 @@ export type WhereOp =
   | "in"
   | "not-in"
   | "array-contains"
-  | "array-contains-any";
+  | "array-contains-any"
+  // Postgres-specific (no Firestore equivalent). `value` is the LIKE pattern
+  // including any % wildcards the caller wants.
+  | "like"
+  | "ilike";
 
 export interface WhereConstraint {
   __kind: "where";
@@ -146,6 +150,14 @@ PostgrestFilterBuilder<any, any, any, any>).overlaps(
             (c.value as unknown[]) ?? []
           );
           break;
+        case "like":
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).like(c.field, String(c.value));
+          break;
+        case "ilike":
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).ilike(c.field, String(c.value));
+          break;
       }
     } else if (c.__kind === "orderBy") {
       q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,6 +199,17 @@ export function rowMatches(row: Record<string, unknown>, constraints: QueryConst
       case "not-in": if (Array.isArray(c.value) && (c.value as unknown[]).includes(v)) return false; break;
       case "array-contains":     if (!(Array.isArray(v) && v.includes(c.value))) return false; break;
       case "array-contains-any": if (!(Array.isArray(v) && Array.isArray(c.value) && (c.value as unknown[]).some((x) => v.includes(x)))) return false; break;
+      case "like":
+      case "ilike": {
+        if (typeof v !== "string") return false;
+        const pattern = String(c.value);
+        const re = new RegExp(
+          "^" + pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".") + "$",
+          c.op === "ilike" ? "i" : ""
+        );
+        if (!re.test(v)) return false;
+        break;
+      }
     }
   }
   return true;

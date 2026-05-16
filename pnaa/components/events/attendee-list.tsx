@@ -50,9 +50,11 @@ import type { Member } from "@/types/member";
 type AttendeeRow = Attendee & { id: string };
 
 const WA_PAGE_SIZE = 50;
-// Title-case a search prefix to match how WA stores names ("First Last").
-const titleCase = (s: string) =>
-  s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+
+/** Escape LIKE/ILIKE wildcards in user input so a literal "%" doesn't match everything. */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
 
 export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
   const { user } = useAuth();
@@ -82,10 +84,8 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
 
     const startCursor = waCursors[waPage] ?? null;
     const constraints: QueryConstraint[] = [where("source", "==", "wildapricot")];
-    if (debouncedWaSearch.trim().length >= 2) {
-      const prefix = titleCase(debouncedWaSearch.trim());
-      constraints.push(where("name", ">=", prefix));
-      constraints.push(where("name", "<", prefix + ""));
+    if (debouncedWaSearch.trim().length > 0) {
+      constraints.push(where("name", "ilike", `%${escapeLike(debouncedWaSearch.trim())}%`));
     }
     constraints.push(orderBy("name"));
     if (startCursor) constraints.push(startAfter(startCursor));
@@ -467,13 +467,13 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           data={waRows}
           loading={waLoading}
           emptyTitle={
-            debouncedWaSearch.trim().length >= 2
+            debouncedWaSearch.trim().length > 0
               ? "No matching registrations"
               : "No registrations"
           }
           emptyDescription={
-            debouncedWaSearch.trim().length >= 2
-              ? "Try a different search prefix"
+            debouncedWaSearch.trim().length > 0
+              ? "Try a different search term"
               : "No Wild Apricot registrations for this event"
           }
           emptyIcon={Users}
@@ -636,26 +636,23 @@ function AddManualAttendeeDialogBody({
   const [submitting, setSubmitting] = useState(false);
 
   const trimmed = debouncedSearch.trim();
-  const minSearch = 2;
 
-  // Fire a server-side prefix query only once we have ≥ 2 chars. Filters to
-  // active members, optionally scoped to the event's chapter to keep result
-  // sets small. Limited to 25 hits.
+  // Fire a server-side ILIKE substring query whenever there's any input.
+  // Filters to active members, optionally scoped to the event's chapter to
+  // keep result sets small. Limited to 25 hits.
   useEffect(() => {
     let cancelled = false;
-    if (trimmed.length < minSearch) {
+    if (trimmed.length === 0) {
       setResults([]);
       setLoading(false);
       return;
     }
     setLoading(true);
-    const prefix = titleCase(trimmed);
     const constraints: QueryConstraint[] = [where("activeStatus", "==", "Active")];
     if (scopeChapter && event.chapterId) {
       constraints.push(where("chapterId", "==", event.chapterId));
     }
-    constraints.push(where("name", ">=", prefix));
-    constraints.push(where("name", "<", prefix + ""));
+    constraints.push(where("name", "ilike", `%${escapeLike(trimmed)}%`));
     constraints.push(orderBy("name"));
     constraints.push(fsLimit(25));
 
@@ -727,7 +724,7 @@ function AddManualAttendeeDialogBody({
       <DialogHeader>
         <DialogTitle>Add Attendee</DialogTitle>
         <DialogDescription>
-          Search active members by name. Type at least {minSearch} letters.
+          Search active members by name.
         </DialogDescription>
       </DialogHeader>
 
@@ -735,7 +732,7 @@ function AddManualAttendeeDialogBody({
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder={`Search by name (≥ ${minSearch} chars)…`}
+          placeholder="Search by name…"
           className="w-full"
         />
 
@@ -767,9 +764,9 @@ function AddManualAttendeeDialogBody({
               Change
             </Button>
           </div>
-        ) : trimmed.length < minSearch ? (
+        ) : trimmed.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Type at least {minSearch} letters to search.
+            Type any part of a member name to search.
           </p>
         ) : (
           <ScrollArea className="h-64 rounded-md border">

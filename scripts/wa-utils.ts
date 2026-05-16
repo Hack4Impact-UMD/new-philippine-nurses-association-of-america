@@ -114,7 +114,21 @@ export class ChapterResolver {
     if (existing) return existing;
     const id = chapterSlug(trimmed);
     if (!id) return null;
-    if (!this.byId.has(id) && !this.pending.has(id)) {
+
+    const existingById = this.byId.get(id);
+    if (existingById) {
+      // Row exists but its name wasn't in byName — back-fill the name/region
+      // so the next chapter upsert restores them.
+      if (!existingById.name || (!existingById.region && fallbackRegion)) {
+        const patched: ChapterRow = {
+          id,
+          name: existingById.name || trimmed,
+          region: existingById.region || fallbackRegion || null,
+        };
+        this.byId.set(id, patched);
+        this.pending.set(id, patched);
+      }
+    } else if (!this.pending.has(id)) {
       this.pending.set(id, { id, name: trimmed, region: fallbackRegion || null });
       this.byId.set(id, { id, name: trimmed, region: fallbackRegion || null });
     }

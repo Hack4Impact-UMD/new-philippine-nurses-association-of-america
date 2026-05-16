@@ -197,17 +197,30 @@ async function main() {
   }
 
   // Zero out chapters that lost all members.
-  const { data: existingChapters } = await supabase.from("chapters").select("id");
+  const { data: existingChapters } = await supabase.from("chapters").select("id, name, region");
   const upserts: Array<Record<string, unknown>> = [];
   for (const c of existingChapters ?? []) {
-    const id = (c as { id: string }).id;
-    if (!chapterCounts[id]) {
-      upserts.push({ id, totalMembers: 0, totalActive: 0, totalLapsed: 0 });
+    const row = c as { id: string; name: string; region: string | null };
+    if (!chapterCounts[row.id]) {
+      // Include name/region so the upsert is INSERT-safe if name was previously null.
+      upserts.push({
+        id: row.id,
+        name: row.name,
+        region: row.region,
+        totalMembers: 0,
+        totalActive: 0,
+        totalLapsed: 0,
+      });
     }
   }
   for (const [chapterId, counts] of Object.entries(chapterCounts)) {
+    // Pull canonical name/region from the resolver so the upsert can INSERT
+    // safely if the chapter row doesn't exist yet (NOT NULL on chapters.name).
+    const meta = resolver.get(chapterId);
     upserts.push({
       id: chapterId,
+      name: meta?.name ?? chapterId,
+      region: meta?.region ?? null,
       totalMembers: counts.totalMembers,
       totalActive: counts.totalActive,
       totalLapsed: counts.totalLapsed,

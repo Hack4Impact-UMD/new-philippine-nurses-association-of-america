@@ -191,8 +191,6 @@ begin
 end;
 $$;
 
-create trigger members_last_updated  before update on public.members
-  for each row execute function public.tg_set_last_updated();
 create trigger chapters_last_updated before update on public.chapters
   for each row execute function public.tg_set_last_updated();
 create trigger events_last_updated   before update on public.events
@@ -204,8 +202,7 @@ create trigger subch_last_updated    before update on public.subchapters
 create trigger alias_last_updated    before update on public.chapter_aliases
   for each row execute function public.tg_set_last_updated();
 
--- members table uses "lastSynced", not "lastUpdated" — drop the wrong trigger.
-drop trigger members_last_updated on public.members;
+-- members has "lastSynced" (not "lastUpdated") — separate trigger.
 create or replace function public.tg_set_last_synced()
 returns trigger language plpgsql as $$
 begin

@@ -31,10 +31,11 @@ import type { Member } from "@/types/member";
 type MemberRow = Member & { id: string };
 
 const PAGE_SIZE = 50;
-const MIN_SEARCH = 2;
 
-const titleCase = (s: string) =>
-  s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+/** Escape LIKE/ILIKE wildcards in user input so a literal "%" doesn't match everything. */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
 
 export function MemberList() {
   const router = useRouter();
@@ -62,14 +63,14 @@ export function MemberList() {
     setLoading(true);
 
     const trimmed = debouncedSearch.trim();
-    const isSearching = trimmed.length >= MIN_SEARCH;
+    const isSearching = trimmed.length > 0;
 
     const constraints: QueryConstraint[] = [];
     if (activeOnly) constraints.push(where("activeStatus", "==", "Active"));
     if (isSearching) {
-      const prefix = titleCase(trimmed);
-      constraints.push(where("name", ">=", prefix));
-      constraints.push(where("name", "<", prefix + ""));
+      // Case-insensitive substring match (Postgres ILIKE). Backed by the
+      // (activeStatus, name) index for the common active-only case.
+      constraints.push(where("name", "ilike", `%${escapeLike(trimmed)}%`));
     }
     constraints.push(orderBy("name"));
     const startCursor = cursorsRef.current[page] ?? null;
@@ -178,11 +179,11 @@ export function MemberList() {
         ),
       },
     ],
-    []
+    [nameFor]
   );
 
   const trimmed = debouncedSearch.trim();
-  const isSearching = trimmed.length >= MIN_SEARCH;
+  const isSearching = trimmed.length > 0;
 
   return (
     <div className="space-y-4">
@@ -190,7 +191,7 @@ export function MemberList() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder={`Search by name (≥ ${MIN_SEARCH} chars)…`}
+          placeholder="Search members by name…"
           className="w-full sm:max-w-md"
         />
         <label className="flex items-center gap-2 text-sm">
@@ -198,12 +199,6 @@ export function MemberList() {
           <span className="text-muted-foreground">Active only</span>
         </label>
       </div>
-
-      {!isSearching && search.trim().length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Type at least {MIN_SEARCH} letters to filter results.
-        </p>
-      )}
 
       <AdvancedDataTable<MemberRow>
         columns={columns}
@@ -215,7 +210,7 @@ export function MemberList() {
         }
         emptyDescription={
           isSearching
-            ? "Try a different search prefix"
+            ? "Try a different search term"
             : activeOnly
               ? "No active members on this page"
               : "No members on this page"

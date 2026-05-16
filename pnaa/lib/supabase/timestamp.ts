@@ -81,8 +81,27 @@ export function isServerTimestamp(value: unknown): boolean {
   );
 }
 
-/** Hydrate any timestamptz-looking strings in a row into Timestamp instances. */
-const TIMESTAMP_FIELD_REGEX = /(Date|At|Time|TimeStamp|timestamp|Updated|Created|Login|Synced)$/;
+/**
+ * Hydrate timestamptz columns into Timestamp instances.
+ *
+ * Explicit allowlist — using a regex was too greedy and matched text columns
+ * like `startDate`, `endDate`, `renewalDueDate`, `startTime`, `endTime` (WA
+ * sends those as plain ISO strings and downstream code calls parseISO on them).
+ *
+ * Only the column names below are actually `timestamptz` in
+ * [supabase/migrations/20260515000001_schema.sql](../../../supabase/migrations/20260515000001_schema.sql).
+ */
+const TIMESTAMP_COLUMNS = new Set<string>([
+  "lastUpdated",
+  "lastSynced",
+  "lastLogin",
+  "createdAt",
+  "updatedAt",
+  "creationDate",
+  "triggeredAt",
+  "completedAt",
+  "syncLock",
+]);
 
 export function hydrateTimestamps<T>(row: T): T {
   if (row == null || typeof row !== "object") return row;
@@ -91,7 +110,7 @@ export function hydrateTimestamps<T>(row: T): T {
   for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
     if (
       typeof value === "string" &&
-      TIMESTAMP_FIELD_REGEX.test(key) &&
+      TIMESTAMP_COLUMNS.has(key) &&
       /^\d{4}-\d{2}-\d{2}T/.test(value)
     ) {
       const ts = Timestamp.fromAny(value);
