@@ -27,13 +27,13 @@ export async function POST(request: NextRequest) {
     email,
     displayName,
     role: targetRole,
-    chapterName,
+    chapterId,
     region,
   } = body as {
     email: string;
     displayName: string;
     role: UserRole;
-    chapterName?: string;
+    chapterId?: string;
     region?: string;
   };
 
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       user_metadata: { displayName },
       app_metadata: {
         user_role: targetRole,
-        ...(chapterName ? { chapter_name: chapterName } : {}),
+        ...(chapterId ? { chapter_id: chapterId } : {}),
         ...(region ? { region } : {}),
       },
     });
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       email,
       displayName,
       role: targetRole,
-      chapterName: chapterName ?? null,
+      chapterId: chapterId ?? null,
       region: region ?? null,
       needsOnboarding: false,
     });

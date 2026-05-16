@@ -115,7 +115,8 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
     chapterId
   );
 
-  // Load aliases for this chapter
+  // Aliases now collapse to the same canonical chapterId during sync, so
+  // they're surfaced for display / management only, not used as filter keys.
   const aliasConstraints = useMemo(
     () => [where("chapterId", "==", chapterId)],
     [chapterId]
@@ -124,69 +125,36 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
     "chapter_aliases",
     aliasConstraints
   );
-
-  // All chapter names to query (main + aliases)
-  const allChapterNames = useMemo(() => {
-    if (!chapter?.name) return [];
-    return [chapter.name, ...(aliases as AliasRow[]).map((a) => a.aliasName)];
-  }, [chapter?.name, aliases]);
-
   const hasAliases = (aliases as AliasRow[]).length > 0;
 
-  // Member constraints: use 'in' when aliases exist
-  const memberConstraints = useMemo(() => {
-    if (!allChapterNames.length) return [];
-    if (allChapterNames.length === 1) {
-      return [
-        where("chapterName", "==", allChapterNames[0]),
-        orderBy("name", "asc"),
-      ];
-    }
-    return [
-      where("chapterName", "in", allChapterNames),
-      orderBy("name", "asc"),
-    ];
-  }, [allChapterNames]);
+  const memberConstraints = useMemo(
+    () => [where("chapterId", "==", chapterId), orderBy("name", "asc")],
+    [chapterId]
+  );
 
-  // Event constraints
-  const eventConstraints = useMemo(() => {
-    if (!allChapterNames.length) return [];
-    if (allChapterNames.length === 1) {
-      return [
-        where("chapter", "==", allChapterNames[0]),
-        where("archived", "==", false),
-        orderBy("startDate", "desc"),
-      ];
-    }
-    return [
-      where("chapter", "in", allChapterNames),
+  const eventConstraints = useMemo(
+    () => [
+      where("chapterId", "==", chapterId),
       where("archived", "==", false),
       orderBy("startDate", "desc"),
-    ];
-  }, [allChapterNames]);
+    ],
+    [chapterId]
+  );
 
-  // Fundraising constraints
-  const fundraisingConstraints = useMemo(() => {
-    if (!allChapterNames.length) return [];
-    if (allChapterNames.length === 1) {
-      return [
-        where("chapterName", "==", allChapterNames[0]),
-        where("archived", "==", false),
-        orderBy("date", "desc"),
-      ];
-    }
-    return [
-      where("chapterName", "in", allChapterNames),
+  const fundraisingConstraints = useMemo(
+    () => [
+      where("chapterId", "==", chapterId),
       where("archived", "==", false),
       orderBy("date", "desc"),
-    ];
-  }, [allChapterNames]);
+    ],
+    [chapterId]
+  );
 
   const [showAllMembers, setShowAllMembers] = useState(false);
 
   const { data: members, loading: membersLoading } = useCollectionOnce<Member>(
     "members",
-    allChapterNames.length > 0 ? memberConstraints : []
+    chapterId ? memberConstraints : []
   );
 
   const filteredMembers = useMemo((): MemberRow[] => {
@@ -212,13 +180,13 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
 
   const { data: events, loading: eventsLoading } = useCollection<AppEvent>(
     "events",
-    allChapterNames.length > 0 ? eventConstraints : []
+    chapterId ? eventConstraints : []
   );
 
   const { data: campaigns, loading: campaignsLoading } =
     useCollection<FundraisingCampaign>(
       "fundraising",
-      allChapterNames.length > 0 ? fundraisingConstraints : []
+      chapterId ? fundraisingConstraints : []
     );
 
   if (chapterLoading) {

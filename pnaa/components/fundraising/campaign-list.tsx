@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DollarSign } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import type { FundraisingCampaign } from "@/types/fundraising";
 import { FundraisingChart } from "./fundraising-chart";
@@ -25,7 +26,10 @@ type CampaignRow = FundraisingCampaign & { id: string };
 
 const STORAGE_KEY = "pnaa-fundraising-view";
 
-const columns: ColumnDef<CampaignRow, unknown>[] = [
+function buildColumns(
+  nameFor: (id: string | null | undefined) => string,
+): ColumnDef<CampaignRow, unknown>[] {
+  return [
   {
     accessorKey: "fundraiserName",
     header: "Campaign Name",
@@ -37,13 +41,13 @@ const columns: ColumnDef<CampaignRow, unknown>[] = [
     ),
   },
   {
-    accessorKey: "chapterName",
+    accessorKey: "chapterId",
     header: "Chapter",
     size: 200,
     enableSorting: true,
     meta: { filterType: "text" } satisfies ColumnMeta,
     cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">{row.original.chapterName}</span>
+      <span className="text-sm text-muted-foreground">{nameFor(row.original.chapterId)}</span>
     ),
   },
   {
@@ -108,10 +112,13 @@ const columns: ColumnDef<CampaignRow, unknown>[] = [
         </Badge>
       ),
   },
-];
+  ];
+}
 
 export function CampaignList() {
   const router = useRouter();
+  const { nameFor } = useChaptersMap();
+  const columns = useMemo(() => buildColumns(nameFor), [nameFor]);
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
@@ -142,9 +149,9 @@ export function CampaignList() {
     return data.filter(
       (c) =>
         c.fundraiserName.toLowerCase().includes(q) ||
-        c.chapterName.toLowerCase().includes(q)
+        nameFor(c.chapterId).toLowerCase().includes(q)
     );
-  }, [data, debouncedSearch]);
+  }, [data, debouncedSearch, nameFor]);
 
   const totalRaised = data.reduce((sum, c) => sum + c.amount, 0);
 

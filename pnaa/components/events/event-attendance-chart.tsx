@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { AppEvent } from "@/types/event";
 
 interface Props {
@@ -21,6 +22,7 @@ function formatMonth(ym: string) {
 }
 
 export function EventAttendanceChart({ events, loading }: Props) {
+  const { regionFor } = useChaptersMap();
   const currentMonth = useMemo(() => new Date().toISOString().slice(0, 7), []);
   const twelveMonthsAgo = useMemo(() => {
     const d = new Date();
@@ -33,19 +35,19 @@ export function EventAttendanceChart({ events, loading }: Props) {
     const regionSet = new Set<string>();
 
     for (const e of events) {
-      if (!e.startDate || !e.region) continue;
+      const region = regionFor(e.chapterId);
+      if (!e.startDate || !region) continue;
       const month = e.startDate.slice(0, 7);
       if (month < twelveMonthsAgo || month > currentMonth) continue;
       if (!grid.has(month)) grid.set(month, new Map());
       const row = grid.get(month)!;
-      row.set(e.region, (row.get(e.region) ?? 0) + (e.attendees ?? 0));
-      regionSet.add(e.region);
+      row.set(region, (row.get(region) ?? 0) + (e.attendees ?? 0));
+      regionSet.add(region);
     }
 
     const months = Array.from(grid.keys()).sort();
     const regions = Array.from(regionSet).sort();
 
-    // Build recharts-friendly row per month: { month, RegionA: 12, RegionB: 5, ... }
     const chartData = months.map((m) => {
       const row: Record<string, string | number> = { month: formatMonth(m) };
       for (const r of regions) {
@@ -55,7 +57,7 @@ export function EventAttendanceChart({ events, loading }: Props) {
     });
 
     return { chartData, regions };
-  }, [events, twelveMonthsAgo, currentMonth]);
+  }, [events, twelveMonthsAgo, currentMonth, regionFor]);
 
   if (loading) {
     return (

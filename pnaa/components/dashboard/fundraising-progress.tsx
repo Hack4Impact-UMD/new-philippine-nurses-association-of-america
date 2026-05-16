@@ -10,6 +10,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { ArrowUpRight } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
 export function FundraisingProgress({
@@ -17,6 +18,7 @@ export function FundraisingProgress({
 }: {
   campaigns: (FundraisingCampaign & { id: string })[];
 }) {
+  const { nameFor } = useChaptersMap();
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -50,7 +52,7 @@ export function FundraisingProgress({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mb-2">
-                  {campaign.chapterName}
+                  {nameFor(campaign.chapterId)}
                 </p>
               </Link>
             ))}

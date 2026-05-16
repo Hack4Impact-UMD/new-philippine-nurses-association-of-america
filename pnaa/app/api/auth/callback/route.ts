@@ -72,15 +72,15 @@ export async function GET(request: NextRequest) {
     // 3. Upsert the public.users profile and read the persisted role.
     const { data: existing } = await admin
       .from("users")
-      .select("role, chapterName, region")
+      .select("role, chapterId, region")
       .eq("id", authUserId)
       .maybeSingle();
 
     const isNewUser = !existing;
     const role: string =
       (existing as { role?: string } | null)?.role ?? "member";
-    const chapterName: string | null =
-      (existing as { chapterName?: string } | null)?.chapterName ?? null;
+    const chapterId: string | null =
+      (existing as { chapterId?: string } | null)?.chapterId ?? null;
     const region: string | null =
       (existing as { region?: string } | null)?.region ?? null;
 
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     await admin.auth.admin.updateUserById(authUserId, {
       app_metadata: {
         user_role: role,
-        ...(chapterName ? { chapter_name: chapterName } : {}),
+        ...(chapterId ? { chapter_id: chapterId } : {}),
         ...(region ? { region } : {}),
       },
     });

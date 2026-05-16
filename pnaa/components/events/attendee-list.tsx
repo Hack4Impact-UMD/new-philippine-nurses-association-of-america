@@ -35,6 +35,7 @@ import { SearchInput } from "@/components/shared/search-input";
 import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useIsAdmin, useIsNationalAdmin } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { useDebounce } from "@/hooks/use-debounce";
 import {
   setAttendance,
@@ -620,10 +621,11 @@ function AddManualAttendeeDialogBody({
   onClose: () => void;
 }) {
   const { user } = useAuth();
+  const { nameFor } = useChaptersMap();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
   const [scopeChapter, setScopeChapter] = useState<boolean>(
-    Boolean(event.chapter)
+    Boolean(event.chapterId)
   );
   const [results, setResults] = useState<(Member & { id: string })[]>([]);
   const [loading, setLoading] = useState(false);
@@ -649,8 +651,8 @@ function AddManualAttendeeDialogBody({
     setLoading(true);
     const prefix = titleCase(trimmed);
     const constraints: QueryConstraint[] = [where("activeStatus", "==", "Active")];
-    if (scopeChapter && event.chapter) {
-      constraints.push(where("chapterName", "==", event.chapter));
+    if (scopeChapter && event.chapterId) {
+      constraints.push(where("chapterId", "==", event.chapterId));
     }
     constraints.push(where("name", ">=", prefix));
     constraints.push(where("name", "<", prefix + ""));
@@ -674,7 +676,7 @@ function AddManualAttendeeDialogBody({
     return () => {
       cancelled = true;
     };
-  }, [trimmed, scopeChapter, event.chapter]);
+  }, [trimmed, scopeChapter, event.chapterId]);
 
   const isConference = event.eventType === "conference";
   const effectiveHours = isConference ? (event.defaultHours ?? 0) : hours;
@@ -737,7 +739,7 @@ function AddManualAttendeeDialogBody({
           className="w-full"
         />
 
-        {event.chapter && (
+        {event.chapterId && (
           <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
@@ -745,7 +747,7 @@ function AddManualAttendeeDialogBody({
               onChange={(e) => setScopeChapter(e.target.checked)}
               className="rounded border-input"
             />
-            Limit to {event.chapter}
+            Limit to {nameFor(event.chapterId)}
           </label>
         )}
 
@@ -754,7 +756,7 @@ function AddManualAttendeeDialogBody({
             <div>
               <p className="font-medium text-sm">{selected.name}</p>
               <p className="text-xs text-muted-foreground">
-                {selected.email} · {selected.chapterName || "No chapter"}
+                {selected.email} · {nameFor(selected.chapterId) || "No chapter"}
               </p>
             </div>
             <Button
@@ -792,7 +794,7 @@ function AddManualAttendeeDialogBody({
                         <div>
                           <p className="font-medium text-sm">{m.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {m.email} · {m.chapterName || "No chapter"}
+                            {m.email} · {nameFor(m.chapterId) || "No chapter"}
                           </p>
                         </div>
                         {alreadyAdded && (

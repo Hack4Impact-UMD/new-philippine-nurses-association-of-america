@@ -5,9 +5,11 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Calendar, MapPin, Users } from "lucide-react";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatDate } from "@/lib/utils";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { AppEvent } from "@/types/event";
 
 export function EventCard({ event }: { event: AppEvent & { id: string } }) {
+  const { nameFor } = useChaptersMap();
   return (
     <Link href={`/events/${event.id}`}>
       <Card className="transition-all hover:shadow-md hover:border-primary/20">
@@ -34,7 +36,7 @@ export function EventCard({ event }: { event: AppEvent & { id: string } }) {
           )}
           <div className="flex items-center justify-between pt-1">
             <span className="text-xs text-muted-foreground">
-              {event.chapter}
+              {nameFor(event.chapterId)}
             </span>
             {event.attendees > 0 && (
               <div className="flex items-center gap-1 text-xs text-muted-foreground">

@@ -58,7 +58,7 @@ export function SubchapterForm({ chapterId, subchapterId, mode }: SubchapterForm
   const forbidden =
     !chapterLoading &&
     chapter &&
-    ((isChapterAdmin && chapter.name !== user?.chapterName) ||
+    ((isChapterAdmin && chapterId !== user?.chapterId) ||
       (isRegionAdmin && chapter.region !== user?.region));
 
   useEffect(() => {
@@ -107,8 +107,6 @@ export function SubchapterForm({ chapterId, subchapterId, mode }: SubchapterForm
           name: values.name,
           description: values.description || "",
           chapterId,
-          chapterName: chapter.name,
-          region: chapter.region,
           memberIds: [],
           archived: false,
           createdBy: user?.email || "",

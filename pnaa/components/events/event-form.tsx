@@ -29,6 +29,7 @@ import {
 import { addDocument, updateDocument } from "@/lib/supabase/firestore";
 import { propagateConferenceDefaultHours } from "@/lib/supabase/attendees";
 import { useAuth } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Timestamp } from "@/lib/supabase/firestore";
 import {
   EVENT_TYPE_LABELS,
@@ -46,8 +47,7 @@ const eventSchema = z.object({
   startTime: z.string(),
   endTime: z.string(),
   location: z.string(),
-  chapter: z.string().min(1, "Chapter is required"),
-  region: z.string(),
+  chapterId: z.string().min(1, "Chapter is required"),
   about: z.string(),
   eventType: z.enum(["conference", "community_outreach"]),
   eventSubtype: z.enum([
@@ -75,11 +75,11 @@ export function EventForm({ event, mode }: EventFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const { all: chapters } = useChaptersMap();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const subchapterId = searchParams.get("subchapterId") || undefined;
-  const chapterFromParams = searchParams.get("chapter") || "";
-  const regionFromParams = searchParams.get("region") || "";
+  const chapterIdFromParams = searchParams.get("chapterId") || "";
 
   const form = useForm<EventFormValues>({
     resolver: zodResolver(eventSchema),
@@ -90,8 +90,7 @@ export function EventForm({ event, mode }: EventFormProps) {
       startTime: event?.startTime || "",
       endTime: event?.endTime || "",
       location: event?.location || "",
-      chapter: event?.chapter || chapterFromParams,
-      region: event?.region || regionFromParams,
+      chapterId: event?.chapterId || chapterIdFromParams,
       about: event?.about || "",
       eventType: event?.eventType || "conference",
       eventSubtype: event?.eventSubtype || "in_person",
@@ -129,7 +128,6 @@ export function EventForm({ event, mode }: EventFormProps) {
         ...values,
         eventSubtype: subtype,
         location: values.location || "",
-        region: values.region || "",
         about: values.about || "",
         startTime: values.startTime || "",
         endTime: values.endTime || "",
@@ -334,34 +332,37 @@ export function EventForm({ event, mode }: EventFormProps) {
               )}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="chapter"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Chapter</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Chapter name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="region"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Region</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Region" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+            <FormField
+              control={form.control}
+              name="chapterId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Chapter</FormLabel>
+                  <FormControl>
+                    <Select
+                      value={field.value}
+                      onValueChange={(value) => field.onChange(value)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a chapter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chapters
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                              {c.region ? ` · ${c.region}` : ""}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

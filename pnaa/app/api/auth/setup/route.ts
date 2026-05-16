@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     const admin = supabaseAdmin();
     const { data: userRow, error: selErr } = await admin
       .from("users")
-      .select("needsOnboarding, role, chapterName, region")
+      .select("needsOnboarding, role")
       .eq("id", uid)
       .maybeSingle();
     if (selErr) throw selErr;
@@ -20,24 +20,33 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { chapterName, region } = body as { chapterName: string; region: string };
-    if (!chapterName || !region) {
+    const { chapterId, region } = body as { chapterId: string; region: string };
+    if (!chapterId || !region) {
       return NextResponse.json(
         { error: "Chapter and region are required" },
         { status: 400 }
       );
     }
 
+    // Sanity-check the chapter exists.
+    const { data: chapterRow } = await admin
+      .from("chapters")
+      .select("id")
+      .eq("id", chapterId)
+      .maybeSingle();
+    if (!chapterRow) {
+      return NextResponse.json({ error: "Unknown chapter" }, { status: 400 });
+    }
+
     const { error: updErr } = await admin
       .from("users")
-      .update({ chapterName, region, needsOnboarding: false })
+      .update({ chapterId, region, needsOnboarding: false })
       .eq("id", uid);
     if (updErr) throw updErr;
 
-    // Mirror into auth.users.app_metadata so future JWTs carry it.
     const role = (userRow as { role: string }).role;
     await admin.auth.admin.updateUserById(uid, {
-      app_metadata: { user_role: role, chapter_name: chapterName, region },
+      app_metadata: { user_role: role, chapter_id: chapterId, region },
     });
 
     return NextResponse.json({ success: true });

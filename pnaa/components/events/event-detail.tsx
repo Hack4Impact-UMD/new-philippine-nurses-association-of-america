@@ -12,6 +12,7 @@ import { AttendeeList } from "./attendee-list";
 import { formatDateRange } from "@/lib/utils";
 import { Pencil, Calendar, MapPin, Clock, Building2 } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import {
   EVENT_TYPE_LABELS,
   EVENT_SUBTYPE_LABELS,
@@ -21,6 +22,7 @@ import {
 export function EventDetail({ eventId }: { eventId: string }) {
   const { data: event, loading } = useDocument<AppEvent>("events", eventId);
   const isAdmin = useIsAdmin();
+  const { nameFor } = useChaptersMap();
 
   if (loading) {
     return (
@@ -83,7 +85,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
             )}
             <span className="flex items-center gap-1">
               <Building2 className="h-4 w-4" />
-              {event.chapter}
+              {nameFor(event.chapterId)}
             </span>
           </div>
         </div>

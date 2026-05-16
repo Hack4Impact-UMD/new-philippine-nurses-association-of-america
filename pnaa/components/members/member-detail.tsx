@@ -13,6 +13,7 @@ import {
 } from "@/lib/supabase/firestore";
 import { db } from "@/lib/supabase/client";
 import { useDocumentOnce } from "@/hooks/use-firestore";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ interface AttendedEventRow {
 
 export function MemberDetail({ memberId }: { memberId: string }) {
   const router = useRouter();
+  const { nameFor, regionFor } = useChaptersMap();
   const { data: member, loading: memberLoading } = useDocumentOnce<Member>(
     "members",
     memberId
@@ -114,8 +116,8 @@ export function MemberDetail({ memberId }: { memberId: string }) {
           eventId: a.eventId,
           eventName: ev.name,
           startDate: ev.startDate,
-          chapter: ev.chapter,
-          region: ev.region,
+          chapter: nameFor(ev.chapterId),
+          region: regionFor(ev.chapterId),
           eventType: ev.eventType,
           eventSubtype: ev.eventSubtype,
           hours: Number(a.hours ?? 0),
@@ -263,7 +265,7 @@ export function MemberDetail({ memberId }: { memberId: string }) {
             </div>
             <p className="text-muted-foreground text-sm">{member.email}</p>
             <p className="text-muted-foreground text-sm">
-              {member.chapterName || "No chapter"}
+              {nameFor(member.chapterId) || "No chapter"}
               {member.region ? ` · ${member.region}` : ""}
               {member.membershipLevel ? ` · ${member.membershipLevel}` : ""}
             </p>

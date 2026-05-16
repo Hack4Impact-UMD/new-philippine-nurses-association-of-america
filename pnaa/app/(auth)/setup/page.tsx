@@ -22,7 +22,7 @@ export default function SetupPage() {
     useCollection<Chapter>("chapters");
 
   const [region, setRegion] = useState("");
-  const [chapterName, setChapterName] = useState("");
+  const [chapterId, setChapterName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +58,7 @@ export default function SetupPage() {
   };
 
   const handleSubmit = async () => {
-    if (!region || !chapterName) return;
+    if (!region || !chapterId) return;
 
     setSaving(true);
     setError(null);
@@ -67,7 +67,7 @@ export default function SetupPage() {
       const res = await fetch("/api/auth/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapterName, region }),
+        body: JSON.stringify({ chapterId, region }),
       });
 
       if (!res.ok) {
@@ -131,7 +131,7 @@ export default function SetupPage() {
           {region && (
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
-              <Select value={chapterName} onValueChange={setChapterName}>
+              <Select value={chapterId} onValueChange={setChapterName}>
                 <SelectTrigger id="chapter" className="w-full">
                   <SelectValue placeholder="Select your chapter..." />
                 </SelectTrigger>
@@ -156,7 +156,7 @@ export default function SetupPage() {
           <Button
             className="w-full"
             onClick={handleSubmit}
-            disabled={!region || !chapterName || saving}
+            disabled={!region || !chapterId || saving}
           >
             {saving ? "Saving..." : "Continue"}
           </Button>

@@ -305,6 +305,35 @@ Service-role queries bypass RLS — Edge Functions and Next.js API routes use th
 
 ---
 
+## 3.5 Normalization pass (2026-05-15 follow-up)
+
+After the initial deploy, the schema was normalized so every chapter reference is a real foreign key. The old Firestore-style "chapter name as join key" columns are gone.
+
+| Table | Before | After |
+|---|---|---|
+| `members` | `chapterName text` | `chapterId text` → `chapters(id)` |
+| `events` | `chapter text`, `region text` | `chapterId text` → `chapters(id)` (region derives from the joined chapter) |
+| `fundraising` | `chapterName text` | `chapterId text` → `chapters(id)` |
+| `subchapters` | `chapterName text`, `region text` | dropped (already had `chapterId`) |
+| `users` | `chapterName text` | `chapterId text` → `chapters(id)` |
+| JWT `app_metadata` | `chapter_name` | `chapter_id` |
+
+The sync layer learned a new helper, [`ChapterResolver`](scripts/wa-utils.ts), shared between the Node sync-members script, the Firestore backfill, and the Deno Edge Functions. It translates WA's free-form chapter strings into the canonical `chapters.id`, looking up aliases via `chapter_aliases` first and creating a new chapter row (slug-id) when WA introduces an unknown name.
+
+The frontend gained a [`useChaptersMap()`](pnaa/hooks/use-chapters-map.ts) hook — one cheap fetch of the chapters table at the top of any component, then `nameFor(chapterId)` / `regionFor(chapterId)` for display.
+
+**To apply this on an already-deployed Supabase project:** because the schema migration files themselves changed (not appended), you'll need to reset the DB:
+
+```bash
+# WARNING: drops every row in every table. Only safe if you haven't backfilled.
+supabase db reset --linked    # against the linked project
+supabase db push              # reapplies all migrations
+supabase functions deploy sync-events
+supabase functions deploy wild-apricot-webhook
+```
+
+If you have real data, write an additive migration that does the rename + backfill instead — left as future work since the project is pre-cutover.
+
 ## 4. Storage Migration — feature dropped
 
 The Firebase Storage bucket was only used for **event posters**. Rather than re-create the bucket and migrate the blobs, the feature was removed during the migration. If posters are wanted back later, the simplest path is to add a `posterUrl text` column on `events` and let admins paste a URL hosted somewhere else (CDN, S3, the org's existing image host).

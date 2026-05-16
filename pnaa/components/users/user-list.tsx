@@ -65,7 +65,7 @@ interface EditUserDialogProps {
 
 function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
   const [role, setRole] = useState<UserRole>(user?.role ?? "member");
-  const [chapterName, setChapterName] = useState(user?.chapterName ?? "");
+  const [chapterId, setChapterId] = useState<string>(user?.chapterId ?? "");
   const [region, setRegion] = useState(user?.region ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -87,13 +87,13 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
     setRole(newRole);
     if (newRole === "national_admin" || newRole === "member") {
       setRegion("");
-      setChapterName("");
+      setChapterId("");
     }
   };
 
-  const handleChapterChange = (name: string) => {
-    setChapterName(name);
-    const chapter = chapters.find((c) => c.name === name);
+  const handleChapterChange = (id: string) => {
+    setChapterId(id);
+    const chapter = chapters.find((c) => c.id === id);
     if (chapter?.region) setRegion(chapter.region);
   };
 
@@ -104,7 +104,7 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
       toast.error("Please select a region for Region Admin");
       return;
     }
-    if (role === "chapter_admin" && !chapterName) {
+    if (role === "chapter_admin" && !chapterId) {
       toast.error("Please select a chapter for Chapter Admin");
       return;
     }
@@ -116,7 +116,7 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           role,
-          chapterName: role === "chapter_admin" ? chapterName : null,
+          chapterId: role === "chapter_admin" ? chapterId : null,
           region:
             role === "region_admin" || role === "chapter_admin" ? region : null,
         }),
@@ -224,13 +224,13 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
           {role === "chapter_admin" && (
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
-              <Select value={chapterName} onValueChange={handleChapterChange}>
+              <Select value={chapterId} onValueChange={handleChapterChange}>
                 <SelectTrigger id="chapter">
                   <SelectValue placeholder="Select chapter..." />
                 </SelectTrigger>
                 <SelectContent>
                   {filteredChapters.map((c) => (
-                    <SelectItem key={c.id} value={c.name}>
+                    <SelectItem key={c.id} value={c.id}>
                       {c.name}
                     </SelectItem>
                   ))}
@@ -312,15 +312,17 @@ export function UserList() {
         meta: { filterType: "text" },
       },
       {
-        accessorKey: "chapterName",
+        accessorKey: "chapterId",
         header: "Chapter",
         size: 200,
-        cell: ({ row }) =>
-          row.original.chapterName ? (
-            <span className="text-sm">{row.original.chapterName}</span>
+        cell: ({ row }) => {
+          const c = chapters.find((c) => c.id === row.original.chapterId);
+          return c ? (
+            <span className="text-sm">{c.name}</span>
           ) : (
             <span className="text-muted-foreground/40 text-sm">—</span>
-          ),
+          );
+        },
         meta: { filterType: "text" },
       },
       {

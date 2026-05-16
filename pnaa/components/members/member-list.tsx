@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Users, ChevronLeft, ChevronRight } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { formatDate } from "@/lib/utils";
 import type { Member } from "@/types/member";
 
@@ -37,6 +38,7 @@ const titleCase = (s: string) =>
 
 export function MemberList() {
   const router = useRouter();
+  const { nameFor } = useChaptersMap();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [activeOnly, setActiveOnly] = useState(true);
@@ -123,12 +125,12 @@ export function MemberList() {
         ),
       },
       {
-        accessorKey: "chapterName",
+        accessorKey: "chapterId",
         header: "Chapter",
         size: 220,
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-sm">{row.original.chapterName || "—"}</span>
+          <span className="text-sm">{nameFor(row.original.chapterId) || "—"}</span>
         ),
       },
       {

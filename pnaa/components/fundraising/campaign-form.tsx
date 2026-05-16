@@ -19,14 +19,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { addDocument, updateDocument } from "@/lib/supabase/firestore";
 import { useAuth } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Timestamp } from "@/lib/supabase/firestore";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
 const campaignSchema = z.object({
   fundraiserName: z.string().min(1, "Fundraiser name is required"),
-  chapterName: z.string().min(1, "Chapter name is required"),
+  chapterId: z.string().min(1, "Chapter is required"),
   date: z.string().min(1, "Date is required"),
   amount: z.number().min(0, "Amount must be positive"),
   note: z.string(),
@@ -44,16 +52,17 @@ export function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const { all: chapters } = useChaptersMap();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const subchapterId = searchParams.get("subchapterId") || undefined;
-  const chapterFromParams = searchParams.get("chapterName") || "";
+  const chapterIdFromParams = searchParams.get("chapterId") || "";
 
   const form = useForm<CampaignFormValues>({
     resolver: zodResolver(campaignSchema),
     defaultValues: {
       fundraiserName: campaign?.fundraiserName || "",
-      chapterName: campaign?.chapterName || chapterFromParams || user?.chapterName || "",
+      chapterId: campaign?.chapterId || chapterIdFromParams || user?.chapterId || "",
       date: campaign?.date || new Date().toISOString().split("T")[0],
       amount: campaign?.amount || 0,
       note: campaign?.note || "",
@@ -116,12 +125,26 @@ export function CampaignForm({ campaign, mode }: CampaignFormProps) {
 
             <FormField
               control={form.control}
-              name="chapterName"
+              name="chapterId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Chapter Name</FormLabel>
+                  <FormLabel>Chapter</FormLabel>
                   <FormControl>
-                    <Input placeholder="Chapter name" {...field} />
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a chapter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chapters
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </FormControl>
                   <FormMessage />
                 </FormItem>

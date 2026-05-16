@@ -23,9 +23,9 @@ export async function PATCH(
 
   const { userId } = await params;
   const body = await request.json();
-  const { role, chapterName, region } = body as {
+  const { role, chapterId, region } = body as {
     role: UserRole;
-    chapterName?: string;
+    chapterId?: string;
     region?: string;
   };
 
@@ -39,7 +39,7 @@ export async function PATCH(
       .from("users")
       .update({
         role,
-        chapterName: chapterName ?? null,
+        chapterId: chapterId ?? null,
         region: region ?? null,
       })
       .eq("id", userId);
@@ -48,7 +48,7 @@ export async function PATCH(
     const { error: claimsErr } = await admin.auth.admin.updateUserById(userId, {
       app_metadata: {
         user_role: role,
-        ...(chapterName ? { chapter_name: chapterName } : {}),
+        ...(chapterId ? { chapter_id: chapterId } : {}),
         ...(region ? { region } : {}),
       },
     });

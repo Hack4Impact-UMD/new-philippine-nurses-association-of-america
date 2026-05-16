@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DollarSign } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
 export function CampaignCard({
@@ -11,6 +12,7 @@ export function CampaignCard({
 }: {
   campaign: FundraisingCampaign & { id: string };
 }) {
+  const { nameFor } = useChaptersMap();
   return (
     <Link href={`/fundraising/${campaign.id}`}>
       <Card className="transition-all hover:shadow-md hover:border-primary/20">
@@ -29,7 +31,7 @@ export function CampaignCard({
             {formatCurrency(campaign.amount)}
           </p>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{campaign.chapterName}</span>
+            <span>{nameFor(campaign.chapterId)}</span>
             <span>{formatDate(campaign.date)}</span>
           </div>
           {campaign.note && (

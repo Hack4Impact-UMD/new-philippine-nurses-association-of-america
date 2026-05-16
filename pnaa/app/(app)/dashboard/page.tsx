@@ -63,7 +63,7 @@ export default function DashboardPage() {
         title={
           isNationalAdmin
             ? "National Dashboard"
-            : `${user?.chapterName || "Chapter"} Dashboard`
+            : `${chapters.find((c) => (c as Chapter & { id: string }).id === user?.chapterId)?.name || "Chapter"} Dashboard`
         }
         description="Overview of your organization"
       />
