@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { addDocument, updateDocument } from "@/lib/firebase/firestore";
+import { addDocument, updateDocument } from "@/lib/supabase/firestore";
 import { useDocument } from "@/hooks/use-firestore";
 import { useAuth } from "@/hooks/use-auth";
 import type { Chapter } from "@/types/chapter";

@@ -7,13 +7,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { onAuthStateChanged, signInWithCustomToken, signOut as firebaseSignOut, type User as FirebaseUser } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase/config";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { hydrateTimestamps } from "@/lib/supabase/timestamp";
 import type { AppUser } from "@/types/user";
 
 interface AuthContextType {
-  firebaseUser: FirebaseUser | null;
+  // Kept as `firebaseUser` for backwards-compat with callers that still
+  // reference this field. It's a Supabase user now.
+  firebaseUser: SupabaseUser | null;
   user: (AppUser & { uid: string }) | null;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -31,33 +33,52 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [user, setUser] = useState<(AppUser & { uid: string }) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      setFirebaseUser(fbUser);
+    const supabase = getSupabaseBrowser();
 
-      if (fbUser) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", fbUser.uid));
-          if (userDoc.exists()) {
-            setUser({ ...userDoc.data() as AppUser, uid: fbUser.uid });
-          } else {
-            setUser(null);
-          }
-        } catch {
-          setUser(null);
-        }
+    const loadProfile = async (sbUser: SupabaseUser | null) => {
+      if (!sbUser) {
+        setUser(null);
+        return;
+      }
+      const { data } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", sbUser.id)
+        .maybeSingle();
+      if (data) {
+        setUser({
+          ...(hydrateTimestamps(data) as AppUser),
+          uid: sbUser.id,
+        });
       } else {
         setUser(null);
       }
+    };
 
+    supabase.auth.getSession().then(async ({ data }: { data: { session: { user: SupabaseUser } | null } }) => {
+      const sbUser = data.session?.user ?? null;
+      setAuthUser(sbUser);
+      await loadProfile(sbUser);
       setIsLoading(false);
     });
 
-    return () => unsubscribe();
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event: string, session: { user: SupabaseUser } | null) => {
+        const sbUser = session?.user ?? null;
+        setAuthUser(sbUser);
+        await loadProfile(sbUser);
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = () => {
@@ -65,16 +86,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    const supabase = getSupabaseBrowser();
+    await supabase.auth.signOut();
     await fetch("/api/auth/signout", { method: "POST" });
     setUser(null);
+    setAuthUser(null);
     window.location.href = "/signin";
   };
 
   return (
     <AuthContext.Provider
       value={{
-        firebaseUser,
+        firebaseUser: authUser,
         user,
         isLoading,
         isAuthenticated: !!user,

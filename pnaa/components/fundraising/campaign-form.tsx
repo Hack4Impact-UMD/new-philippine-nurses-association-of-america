@@ -19,9 +19,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { addDocument, updateDocument } from "@/lib/firebase/firestore";
+import { addDocument, updateDocument } from "@/lib/supabase/firestore";
 import { useAuth } from "@/hooks/use-auth";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supabase/firestore";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
 const campaignSchema = z.object({

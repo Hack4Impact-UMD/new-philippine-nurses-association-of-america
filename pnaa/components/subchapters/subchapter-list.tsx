@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy } from "@/lib/supabase/firestore";
 import { useCollection } from "@/hooks/use-firestore";
 import { useIsAdmin } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";

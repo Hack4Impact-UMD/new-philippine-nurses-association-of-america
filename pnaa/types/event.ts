@@ -1,10 +1,4 @@
-import { Timestamp } from "firebase/firestore";
-
-export interface EventPoster {
-  name: string;
-  ref: string;
-  downloadURL: string;
-}
+import { Timestamp } from "@/lib/supabase/timestamp";
 
 export type EventType = "conference" | "community_outreach";
 
@@ -53,7 +47,6 @@ export interface AppEvent {
   about: string;
   startTime: string;
   endTime: string;
-  eventPoster: EventPoster;
 
   // Metrics
   attendees: number;

@@ -10,8 +10,8 @@ import {
   onSnapshot,
   query,
   where,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+} from "@/lib/supabase/firestore";
+import { db } from "@/lib/supabase/client";
 import { useDocumentOnce } from "@/hooks/use-firestore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";

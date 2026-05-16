@@ -8,7 +8,7 @@ import {
   useCollectionOnce,
 } from "@/hooks/use-firestore";
 import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy } from "@/lib/supabase/firestore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";

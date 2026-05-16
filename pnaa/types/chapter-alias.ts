@@ -1,4 +1,4 @@
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supabase/timestamp";
 
 export interface ChapterAlias {
   id?: string;

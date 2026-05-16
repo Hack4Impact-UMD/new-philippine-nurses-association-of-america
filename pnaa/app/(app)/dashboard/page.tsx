@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useCollection } from "@/hooks/use-firestore";
 import { useAuth, useIsNationalAdmin } from "@/hooks/use-auth";
-import { where, orderBy, limit } from "firebase/firestore";
+import { where, orderBy, limit } from "@/lib/supabase/firestore";
 import { StatsCards } from "@/components/dashboard/stats-cards";
 import { ChapterListWidget } from "@/components/dashboard/chapter-list-widget";
 import { UpcomingEvents } from "@/components/dashboard/upcoming-events";

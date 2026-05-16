@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCollection } from "@/hooks/use-firestore";
-import { where, orderBy, limit } from "firebase/firestore";
+import { where, orderBy, limit } from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { EventCard } from "./event-card";
 import { EmptyState } from "@/components/shared/empty-state";

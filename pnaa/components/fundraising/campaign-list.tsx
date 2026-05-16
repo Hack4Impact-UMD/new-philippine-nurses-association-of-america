@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCollection } from "@/hooks/use-firestore";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy } from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { CampaignCard } from "./campaign-card";
 import { EmptyState } from "@/components/shared/empty-state";

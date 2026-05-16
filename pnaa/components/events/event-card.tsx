@@ -11,15 +11,6 @@ export function EventCard({ event }: { event: AppEvent & { id: string } }) {
   return (
     <Link href={`/events/${event.id}`}>
       <Card className="transition-all hover:shadow-md hover:border-primary/20">
-        {event.eventPoster?.downloadURL && (
-          <div className="aspect-video w-full overflow-hidden rounded-t-lg">
-            <img
-              src={event.eventPoster.downloadURL}
-              alt={event.name}
-              className="h-full w-full object-cover"
-            />
-          </div>
-        )}
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-semibold text-sm line-clamp-2">

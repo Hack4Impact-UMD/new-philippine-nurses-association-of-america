@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy } from "@/lib/supabase/firestore";
 import { useDocument, useCollection } from "@/hooks/use-firestore";
 import { useAuth, useIsAdmin } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { EventCard } from "@/components/events/event-card";
-import { updateDocument, archiveDocument } from "@/lib/firebase/firestore";
+import { updateDocument, archiveDocument } from "@/lib/supabase/firestore";
 import { toast } from "sonner";
 import { Building2, Users, Plus, X, Search, Pencil, Trash2 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";

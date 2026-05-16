@@ -3,7 +3,6 @@ export type { Chapter } from "./chapter";
 export type { ChapterAlias } from "./chapter-alias";
 export type {
   AppEvent,
-  EventPoster,
   EventType,
   EventSubtype,
   ConferenceSubtype,

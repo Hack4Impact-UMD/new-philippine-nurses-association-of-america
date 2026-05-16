@@ -26,12 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileUpload } from "@/components/shared/file-upload";
-import { addDocument, updateDocument } from "@/lib/firebase/firestore";
-import { uploadEventPoster } from "@/lib/firebase/storage";
-import { propagateConferenceDefaultHours } from "@/lib/firebase/attendees";
+import { addDocument, updateDocument } from "@/lib/supabase/firestore";
+import { propagateConferenceDefaultHours } from "@/lib/supabase/attendees";
 import { useAuth } from "@/hooks/use-auth";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supabase/firestore";
 import {
   EVENT_TYPE_LABELS,
   EVENT_SUBTYPE_LABELS,
@@ -78,7 +76,6 @@ export function EventForm({ event, mode }: EventFormProps) {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [posterFile, setPosterFile] = useState<File | null>(null);
 
   const subchapterId = searchParams.get("subchapterId") || undefined;
   const chapterFromParams = searchParams.get("chapter") || "";
@@ -128,12 +125,6 @@ export function EventForm({ event, mode }: EventFormProps) {
         ? values.eventSubtype
         : validSubtypes[0];
 
-      let eventPoster = event?.eventPoster || {
-        name: "",
-        ref: "",
-        downloadURL: "",
-      };
-
       const eventData = {
         ...values,
         eventSubtype: subtype,
@@ -142,7 +133,6 @@ export function EventForm({ event, mode }: EventFormProps) {
         about: values.about || "",
         startTime: values.startTime || "",
         endTime: values.endTime || "",
-        eventPoster,
         lastUpdatedUser: user?.email || "",
         lastUpdated: Timestamp.now(),
       };
@@ -162,19 +152,9 @@ export function EventForm({ event, mode }: EventFormProps) {
           ...(subchapterId ? { subchapterId } : {}),
         });
 
-        if (posterFile) {
-          eventPoster = await uploadEventPoster(docId, posterFile);
-          await updateDocument("events", docId, { eventPoster });
-        }
-
         toast.success("Event created successfully");
         router.push(`/events/${docId}`);
       } else if (event) {
-        if (posterFile) {
-          eventPoster = await uploadEventPoster(event.id, posterFile);
-          eventData.eventPoster = eventPoster;
-        }
-
         await updateDocument("events", event.id, eventData);
 
         // For conferences, propagate any defaultHours (or type) change to every
@@ -401,15 +381,6 @@ export function EventForm({ event, mode }: EventFormProps) {
               )}
             />
 
-            <div>
-              <label className="text-sm font-medium">Event Poster</label>
-              <div className="mt-2">
-                <FileUpload
-                  onFileSelect={setPosterFile}
-                  currentUrl={event?.eventPoster?.downloadURL}
-                />
-              </div>
-            </div>
           </CardContent>
         </Card>
 

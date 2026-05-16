@@ -97,19 +97,6 @@ export function EventDetail({ eventId }: { eventId: string }) {
         )}
       </div>
 
-      {/* Poster */}
-      {event.eventPoster?.downloadURL && (
-        <Card>
-          <CardContent className="p-0">
-            <img
-              src={event.eventPoster.downloadURL}
-              alt={event.name}
-              className="w-full max-h-96 object-cover rounded-lg"
-            />
-          </CardContent>
-        </Card>
-      )}
-
       {/* Description */}
       {event.about && (
         <Card>

@@ -11,8 +11,8 @@ import {
   where,
   type DocumentSnapshot,
   type QueryConstraint,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+} from "@/lib/supabase/firestore";
+import { db } from "@/lib/supabase/client";
 import {
   AdvancedDataTable,
   type ColumnDef,
@@ -41,7 +41,7 @@ import {
   setAttendeeHours,
   addManualAttendee,
   removeManualAttendee,
-} from "@/lib/firebase/attendees";
+} from "@/lib/supabase/attendees";
 import type { Attendee } from "@/types/attendee";
 import type { AppEvent } from "@/types/event";
 import type { Member } from "@/types/member";

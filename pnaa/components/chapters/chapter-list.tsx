@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCollectionOnce } from "@/hooks/use-firestore";
 import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
-import { orderBy } from "firebase/firestore";
+import { orderBy } from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { ChapterCard } from "./chapter-card";
 import { EmptyState } from "@/components/shared/empty-state";
