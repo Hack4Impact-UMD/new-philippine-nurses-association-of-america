@@ -146,10 +146,11 @@ export function CampaignList() {
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return data;
     const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return data.filter(
       (c) =>
-        c.fundraiserName.toLowerCase().includes(q) ||
-        nameFor(c.chapterId).toLowerCase().includes(q)
+        lc(c.fundraiserName).includes(q) ||
+        lc(nameFor(c.chapterId)).includes(q)
     );
   }, [data, debouncedSearch, nameFor]);
 

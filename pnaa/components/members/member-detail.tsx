@@ -126,7 +126,7 @@ export function MemberDetail({ memberId }: { memberId: string }) {
       })
       .filter((r): r is AttendedEventRow => r !== null)
       .sort((a, b) => (a.startDate > b.startDate ? -1 : 1));
-  }, [attendances, eventsById]);
+  }, [attendances, eventsById, nameFor, regionFor]);
 
   const stats = useMemo(() => {
     let totalHours = 0;

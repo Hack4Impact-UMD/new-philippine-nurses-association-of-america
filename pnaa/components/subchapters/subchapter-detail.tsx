@@ -111,9 +111,9 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
 
   const filteredAvailable = useMemo(() => {
     const q = search.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return availableMembers.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)
+      (m) => lc(m.name).includes(q) || lc(m.email).includes(q)
     );
   }, [availableMembers, search]);
 

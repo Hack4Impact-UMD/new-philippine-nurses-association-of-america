@@ -368,7 +368,7 @@ export function UserList() {
         ),
       },
     ],
-    []
+    [chapters]
   );
 
   return (

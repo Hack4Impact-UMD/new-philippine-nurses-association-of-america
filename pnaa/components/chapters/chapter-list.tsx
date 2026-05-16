@@ -211,11 +211,11 @@ export function ChapterList() {
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return mergedChapters;
     const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return mergedChapters.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) || c.region.toLowerCase().includes(q)
+      (c) => lc(c.name).includes(q) || lc(c.region).includes(q)
     );
-  }, [mergedChapters,debouncedSearch]);
+  }, [mergedChapters, debouncedSearch]);
 
   const handleViewChange = (v: ViewMode) => {
     setView(v);

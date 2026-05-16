@@ -286,11 +286,12 @@ export function EventList() {
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return data;
     const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return data.filter(
       (e) =>
-        e.name.toLowerCase().includes(q) ||
-        nameFor(e.chapterId).toLowerCase().includes(q) ||
-        e.location?.toLowerCase().includes(q)
+        lc(e.name).includes(q) ||
+        lc(nameFor(e.chapterId)).includes(q) ||
+        lc(e.location).includes(q)
     );
   }, [data, debouncedSearch, nameFor]);
 

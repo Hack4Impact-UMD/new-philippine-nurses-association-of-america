@@ -83,11 +83,11 @@ export async function addDocument<T extends Record<string, unknown>>(
   data: T
 ): Promise<string> {
   const supabase = getSupabaseBrowser();
-  const payload = prepareForWrite({
-    ...data,
-    creationDate: data.creationDate ?? new Date().toISOString(),
-    lastUpdated: data.lastUpdated ?? new Date().toISOString(),
-  });
+  // Don't auto-inject creationDate/lastUpdated — each table has different
+  // timestamp columns (creationDate, createdAt, lastSynced …) and Postgres
+  // DEFAULT now() / the per-table triggers already populate them. If a caller
+  // wants to override, they can pass the field explicitly.
+  const payload = prepareForWrite({ ...data });
   const { data: inserted, error } = await supabase
     .from(tableFor(collectionName))
     .insert(payload)
