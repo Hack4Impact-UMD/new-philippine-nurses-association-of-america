@@ -121,7 +121,7 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 
 ## Authentication Flow
 
-Authentication uses Wild Apricot OAuth 2.0 to identify users, then mints a Supabase-compatible JWT and sets the `sb-*` session cookies via [`@supabase/ssr`](https://github.com/supabase/auth-helpers).
+Authentication uses Wild Apricot OAuth 2.0 to identify users, then exchanges a Supabase Admin API magic-link for a real Supabase session — no hand-minted JWTs. Cookies are written via [`@supabase/ssr`](https://github.com/supabase/auth-helpers). This means the flow is forward-compatible with Supabase's asymmetric-JWT signing keys.
 
 ```
 1. User visits /signin
@@ -135,8 +135,9 @@ Authentication uses Wild Apricot OAuth 2.0 to identify users, then mints a Supab
    → Finds or creates auth.users row by email (Supabase Admin API)
    → Upserts public.users row (new users get needsOnboarding: true)
    → Writes role / chapter_name / region into auth.users.app_metadata
-   → Signs a JWT with SUPABASE_JWT_SECRET embedding the same app_metadata
-   → Calls supabase.auth.setSession() to write the sb-* cookies
+   → admin.auth.admin.generateLink({ type: 'magiclink', email })
+   → supabase.auth.verifyOtp({ token_hash, type: 'magiclink' })
+     ↳ Supabase issues a real session JWT and writes sb-* cookies on the response
    → Redirects to /setup (new users) or /dashboard (returning users)
 4. /setup page (first-time only):
    → User selects their region, then their chapter
@@ -272,8 +273,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 # Supabase (server-side — private)
-SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_JWT_SECRET=         # Project JWT secret — used to sign tokens in /api/auth/callback
+SUPABASE_SERVICE_ROLE_KEY=   # secret key (sb_secret_...) or legacy service_role JWT
 
 # Wild Apricot OAuth (used by /api/auth/signin and /api/auth/callback)
 WILD_APRICOT_CLIENT_ID=

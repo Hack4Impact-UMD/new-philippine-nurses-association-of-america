@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptionsWithName } from "@supabase/ssr";
 import { exchangeCodeForToken, getContactInfo } from "@/lib/wild-apricot/oauth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
@@ -140,7 +140,9 @@ export async function GET(request: NextRequest) {
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(
+            cookiesToSet: { name: string; value: string; options?: CookieOptionsWithName }[]
+          ) {
             for (const { name, value, options } of cookiesToSet) {
               response.cookies.set(name, value, options);
             }

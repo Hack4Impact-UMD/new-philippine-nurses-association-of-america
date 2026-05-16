@@ -46,7 +46,6 @@ Each section below lists work for one of these phases.
 | `FIREBASE_ADMIN_CLIENT_EMAIL` | (delete) |
 | `FIREBASE_ADMIN_PRIVATE_KEY` | `SUPABASE_SERVICE_ROLE_KEY` |
 | `NEXT_PUBLIC_USE_EMULATOR` | `NEXT_PUBLIC_USE_LOCAL_SUPABASE` (optional, with the Supabase CLI) |
-| (n/a) | `SUPABASE_JWT_SECRET` (used by the OAuth callback to mint signed tokens) |
 
 Keep unchanged: `WILD_APRICOT_API_KEY`, `WILD_APRICOT_ACCOUNT_ID`, `WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL`.
 
@@ -357,9 +356,10 @@ Supabase has no "custom token" primitive; instead, **mint a Supabase-compatible 
 
 ### 5.2 Important auth gotchas — decisions made
 - ✅ Claims go in `app_metadata.user_role`. The RLS helper [auth_role()](supabase/migrations/20260515000003_rls.sql) reads from `auth.jwt() -> 'app_metadata' ->> 'user_role'`.
-- ✅ JWT TTL = 3600s (1 hour), matching the old Firebase session cookie behavior.
-- ⚠️ **Email collisions still open.** The callback finds existing users by email via `auth.admin.listUsers` (page 1, perPage 200). If the prod project has more than 200 users by the time you cut over, switch this to `listUsers` pagination or use Supabase's `getUserByEmail` (when it ships). Today this is fine; flag in a TODO when traffic hits ~150 users.
-- ✅ Email/password sign-up disabled in [supabase/config.toml](supabase/config.toml) (`auth.enable_signup = false`, `auth.email.enable_signup = false`).
+- ✅ JWT TTL = 3600s (1 hour), the Supabase default. Refresh tokens are rotated automatically by `@supabase/ssr` via the middleware.
+- ✅ **No shared-secret JWT minting.** Sessions are issued by Supabase itself via `admin.generateLink({ type: 'magiclink' })` redeemed with `verifyOtp` server-side. No `SUPABASE_JWT_SECRET` needed; works unchanged when Supabase moves to asymmetric JWT signing keys.
+- ⚠️ **Email collisions still open.** The callback finds existing users by email via `auth.admin.listUsers` (page 1, perPage 200). If the prod project has more than 200 users by the time you cut over, switch this to paginated `listUsers` (or `getUserByEmail` when it ships). Today this is fine; flag a TODO when traffic hits ~150 users.
+- ✅ Email/password sign-up disabled in [supabase/config.toml](supabase/config.toml) (`auth.enable_signup = false`, `auth.email.enable_signup = false`). `generateLink` for an *existing* user still works because the Admin API bypasses these toggles.
 - ⚠️ **UID continuity (NOT done in code).** Decide whether to preserve Firebase UIDs as Supabase `auth.users.id` before backfill. If preserving: backfill script needs to pass `id: <existing-uuid>` to `auth.admin.createUser`. If not: existing `subchapters.createdBy` / `fundraising.createdBy` FKs will break.
 
 ---
@@ -583,7 +583,7 @@ Once you've gone two weeks without rolling back, decommission Firebase: disable 
 - [x] §2 Schema + indexes + triggers in `supabase/migrations/` — code complete; `supabase db push` to apply
 - [x] §3 RLS policies — code complete; applied via `supabase db push`
 - [x] §4 Storage — feature dropped (event posters removed); no bucket needed
-- [x] §5 Auth callback rewrite — code complete
+- [x] §5 Auth callback rewrite — code complete, and rewritten to use `admin.generateLink` + `verifyOtp` so we don't depend on the legacy shared JWT secret (forward-compatible with Supabase's new `sb_publishable_` / `sb_secret_` keys + asymmetric JWTs)
 - [x] §6 Frontend hooks + shim layer — code complete (no constraint rewrites needed thanks to the shim)
 - [x] §7 Edge Functions + pg_cron job + create-user API route + GitHub Actions sync-members — code complete
 - [ ] §8 Data backfill script — **not yet written; biggest remaining task**

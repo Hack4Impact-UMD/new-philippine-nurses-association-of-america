@@ -59,8 +59,10 @@ export function limit(count: number): LimitConstraint {
 }
 
 type AnyFilter =
-  | PostgrestFilterBuilder<never, never, unknown>
-  | PostgrestTransformBuilder<never, never, unknown>;
+  | // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>
+  | // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestTransformBuilder<any, any, any, any>;
 
 /** Apply a list of constraints to a Supabase query. */
 export function applyConstraints<T extends AnyFilter>(
@@ -95,52 +97,64 @@ export function applyConstraints<T extends AnyFilter>(
     if (c.__kind === "where") {
       switch (c.op) {
         case "==":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).eq(c.field, c.value as never);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).eq(c.field, c.value as never);
           break;
         case "!=":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).neq(c.field, c.value as never);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).neq(c.field, c.value as never);
           break;
         case "<":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).lt(c.field, c.value as never);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).lt(c.field, c.value as never);
           break;
         case "<=":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).lte(c.field, c.value as never);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).lte(c.field, c.value as never);
           break;
         case ">":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).gt(c.field, c.value as never);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).gt(c.field, c.value as never);
           break;
         case ">=":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).gte(c.field, c.value as never);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).gte(c.field, c.value as never);
           break;
         case "in":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).in(
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).in(
             c.field,
             (c.value as unknown[]) ?? []
           );
           break;
         case "not-in":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).not(
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).not(
             c.field,
             "in",
             `(${((c.value as unknown[]) ?? []).map((v) => JSON.stringify(v)).join(",")})`
           );
           break;
         case "array-contains":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).contains(c.field, [c.value]);
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).contains(c.field, [c.value]);
           break;
         case "array-contains-any":
-          q = (q as PostgrestFilterBuilder<never, never, unknown>).overlaps(
+          q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestFilterBuilder<any, any, any, any>).overlaps(
             c.field,
             (c.value as unknown[]) ?? []
           );
           break;
       }
     } else if (c.__kind === "orderBy") {
-      q = (q as PostgrestTransformBuilder<never, never, unknown>).order(c.field, {
+      q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestTransformBuilder<any, any, any, any>).order(c.field, {
         ascending: c.direction === "asc",
       });
     } else if (c.__kind === "limit") {
-      q = (q as PostgrestTransformBuilder<never, never, unknown>).limit(c.count);
+      q = (q as // eslint-disable-next-line @typescript-eslint/no-explicit-any
+PostgrestTransformBuilder<any, any, any, any>).limit(c.count);
     }
   }
   return q as T;
