@@ -13,8 +13,11 @@ import {
   fetchWAContact,
   fetchWAEvent,
   fetchWARegistration,
-  chapterSlug,
   extractFieldValue,
+  extractChapterName,
+  loadResolver,
+  flushPendingChapters,
+  type ChapterResolver,
 } from "../_shared/wa.ts";
 
 type SupabaseSvc = ReturnType<typeof getServiceClient>;
@@ -24,24 +27,7 @@ interface WAWebhookBody {
   Parameters?: Record<string, string>;
 }
 
-function extractChapter(
-  fieldValues: Array<{ FieldName: string; Value: unknown }>,
-): string {
-  const fields = fieldValues.filter((f) => f.FieldName.includes("Chapter"));
-  for (const f of fields) {
-    if (f.Value == null) continue;
-    if (typeof f.Value === "object" && "Label" in (f.Value as Record<string, unknown>)) {
-      const v = String((f.Value as { Label: string }).Label ?? "");
-      if (v) return v;
-    } else {
-      const v = String(f.Value);
-      if (v) return v;
-    }
-  }
-  return "";
-}
-
-function mapContact(contact: Record<string, unknown>) {
+function mapContact(contact: Record<string, unknown>, resolver: ChapterResolver) {
   const fields = (contact.FieldValues as Array<{ FieldName: string; Value: unknown }>) ?? [];
   const now = new Date();
   const renewalDueDate = extractFieldValue(fields, "Renewal due");
@@ -52,58 +38,53 @@ function mapContact(contact: Record<string, unknown>) {
       "Name" in (contact.MembershipLevel as Record<string, unknown>)
       ? String((contact.MembershipLevel as { Name: unknown }).Name)
       : "";
-  let chapterName = extractChapter(fields);
+  let chapterName = extractChapterName(fields);
   if (!chapterName && membershipLevel === "Member-at-Large (1 year)") {
     chapterName = "PNA Member-at-Large";
   }
+  const region = extractFieldValue(fields, "PNAA Region");
+  const chapterId = resolver.resolve(
+    chapterName,
+    chapterName === "PNA Member-at-Large" ? "" : region,
+  );
+
   return {
     id: memberId,
     name: `${contact.FirstName ?? ""} ${contact.LastName ?? ""}`.trim(),
     email: String(contact.Email ?? ""),
     membershipLevel,
     renewalDueDate,
-    chapterName,
+    chapterId,
     highestEducation: extractFieldValue(fields, "Highest Level of Education"),
     memberId,
-    region: extractFieldValue(fields, "PNAA Region"),
+    region,
     activeStatus,
     lastSynced: now.toISOString(),
   };
 }
 
-async function recalculateChapterAggregates(supabase: SupabaseSvc, chapterNames: string[]) {
+async function recalculateChapterAggregates(supabase: SupabaseSvc, chapterIds: string[]) {
   const now = new Date();
-  for (const chapterName of chapterNames) {
-    if (!chapterName) continue;
+  for (const chapterId of chapterIds) {
+    if (!chapterId) continue;
     const { data: members } = await supabase
       .from("members")
-      .select("renewalDueDate, region")
-      .eq("chapterName", chapterName);
+      .select("renewalDueDate")
+      .eq("chapterId", chapterId);
     let totalMembers = 0;
     let totalActive = 0;
     let totalLapsed = 0;
-    let region = "";
     for (const m of members ?? []) {
-      const row = m as { renewalDueDate?: string; region?: string };
+      const row = m as { renewalDueDate?: string };
       totalMembers++;
       const isActive = row.renewalDueDate && new Date(row.renewalDueDate) >= now;
       if (isActive) totalActive++;
       else totalLapsed++;
-      if (!region && row.region) region = row.region;
     }
     await supabase
       .from("chapters")
-      .upsert(
-        {
-          id: chapterSlug(chapterName),
-          name: chapterName,
-          region,
-          totalMembers,
-          totalActive,
-          totalLapsed,
-        },
-        { onConflict: "id" },
-      );
+      .update({ totalMembers, totalActive, totalLapsed })
+      .eq("id", chapterId);
   }
 }
 
@@ -112,24 +93,28 @@ async function handleContact(
   accessToken: string,
   accountId: string,
   contactId: string,
+  resolver: ChapterResolver,
 ) {
   const raw = await fetchWAContact(accessToken, accountId, contactId);
   if (!raw) return;
-  const member = mapContact(raw);
+  const member = mapContact(raw, resolver);
 
   // Capture old chapter so we can recalc both old and new aggregates.
   const { data: existing } = await supabase
     .from("members")
-    .select("chapterName")
+    .select("chapterId")
     .eq("id", member.id)
     .maybeSingle();
-  const oldChapter = (existing as { chapterName?: string } | null)?.chapterName ?? "";
+  const oldChapterId = (existing as { chapterId?: string } | null)?.chapterId ?? "";
+
+  // Ensure any chapter the resolver invented exists before the FK insert.
+  await flushPendingChapters(supabase, resolver);
 
   const { error } = await supabase.from("members").upsert(member, { onConflict: "id" });
   if (error) throw error;
 
-  const chaptersToRecalc = [member.chapterName, oldChapter].filter(
-    (c, i, arr) => c && arr.indexOf(c) === i,
+  const chaptersToRecalc = [member.chapterId, oldChapterId].filter(
+    (c, i, arr): c is string => !!c && arr.indexOf(c) === i,
   );
   if (chaptersToRecalc.length > 0) {
     await recalculateChapterAggregates(supabase, chaptersToRecalc);
@@ -142,6 +127,7 @@ async function handleEvent(
   accountId: string,
   eventId: string,
   action: string,
+  resolver: ChapterResolver,
 ) {
   if (action === "Deleted") {
     await supabase.from("events").update({ archived: true }).eq("id", eventId);
@@ -159,6 +145,10 @@ async function handleEvent(
     .maybeSingle();
   if (existing) return; // app already manages this row
 
+  // WA events report "Tags" with chapter and region — use the resolver if WA gives us one.
+  // The /v2/events payload doesn't carry a structured chapter; we leave chapterId null
+  // and let admins assign it from the app.
+  await flushPendingChapters(supabase, resolver);
   await supabase.from("events").insert({
     id: eventId,
     name: String(raw.Name ?? ""),
@@ -178,7 +168,6 @@ async function handleEventRegistration(
   action: string,
 ) {
   if (action === "Deleted") {
-    // Only delete if it was a WA-sourced row.
     await supabase
       .from("attendees")
       .delete()
@@ -187,7 +176,6 @@ async function handleEventRegistration(
     return;
   }
 
-  // Ensure the parent event exists; if not, durably queue for later.
   const { data: ev } = await supabase
     .from("events")
     .select("id")
@@ -195,12 +183,7 @@ async function handleEventRegistration(
     .maybeSingle();
   if (!ev) {
     await supabase.from("pending_registrations").upsert(
-      {
-        id: registrationId,
-        eventId,
-        payload: { action, registrationId, eventId },
-        attempts: 0,
-      },
+      { id: registrationId, eventId, payload: { action, registrationId, eventId }, attempts: 0 },
       { onConflict: "id" },
     );
     return;
@@ -209,7 +192,6 @@ async function handleEventRegistration(
   const reg = await fetchWARegistration(accessToken, accountId, registrationId);
   if (!reg) return;
 
-  // Preserve existing attended/hours on update.
   const { data: existing } = await supabase
     .from("attendees")
     .select("attended, hours")
@@ -241,10 +223,7 @@ async function handleEventRegistration(
 }
 
 Deno.serve(async (req) => {
-  // Always return 200 so WA stops retrying. Surface errors via logs.
-  if (req.method !== "POST") {
-    return new Response("ok", { status: 200 });
-  }
+  if (req.method !== "POST") return new Response("ok", { status: 200 });
   if (!verifyWebhookSecret(req)) {
     console.warn("webhook: bad secret");
     return new Response("ok", { status: 200 });
@@ -262,6 +241,7 @@ Deno.serve(async (req) => {
     const supabase = getServiceClient();
     const accessToken = await getWAToken();
     const accountId = getWAAccountId();
+    const resolver = await loadResolver(supabase);
 
     const messageType = body.MessageType ?? "";
     const params = body.Parameters ?? {};
@@ -269,10 +249,10 @@ Deno.serve(async (req) => {
 
     if (messageType === "Contact" || messageType === "Membership" || messageType === "MembershipRenewed") {
       const contactId = params["Contact.Id"] ?? params["ContactId"];
-      if (contactId) await handleContact(supabase, accessToken, accountId, contactId);
+      if (contactId) await handleContact(supabase, accessToken, accountId, contactId, resolver);
     } else if (messageType === "Event") {
       const eventId = params["Event.Id"] ?? params["EventId"];
-      if (eventId) await handleEvent(supabase, accessToken, accountId, eventId, action);
+      if (eventId) await handleEvent(supabase, accessToken, accountId, eventId, action, resolver);
     } else if (messageType === "EventRegistration") {
       const registrationId = params["Registration.Id"] ?? params["RegistrationId"];
       const eventId = params["EventToRegister.Id"] ?? params["Event.Id"];

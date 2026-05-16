@@ -42,6 +42,108 @@ export function chapterSlug(name: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
+export function extractChapterName(
+  fieldValues: Array<{ FieldName: string; Value: unknown }>,
+): string {
+  const fields = fieldValues.filter((f) => f.FieldName.includes("Chapter"));
+  for (const f of fields) {
+    if (f.Value == null) continue;
+    if (typeof f.Value === "object" && "Label" in (f.Value as Record<string, unknown>)) {
+      const v = String((f.Value as { Label: string }).Label ?? "");
+      if (v) return v;
+    } else {
+      const v = String(f.Value);
+      if (v) return v;
+    }
+  }
+  return "";
+}
+
+// ---------- Chapter resolution (Deno) ----------
+//
+// Mirrors scripts/wa-utils.ts ChapterResolver. Used by the webhook + event sync
+// to translate WA chapter names → chapter ids without per-call DB lookups.
+
+export interface ChapterRow {
+  id: string;
+  name: string;
+  region: string | null;
+}
+
+export interface ChapterAliasRow {
+  aliasName: string;
+  chapterId: string;
+}
+
+export class ChapterResolver {
+  private byId = new Map<string, ChapterRow>();
+  private byName = new Map<string, string>();
+  private pending = new Map<string, ChapterRow>();
+
+  constructor(chapters: ChapterRow[], aliases: ChapterAliasRow[]) {
+    for (const c of chapters) {
+      this.byId.set(c.id, c);
+      if (c.name) this.byName.set(c.name.toLowerCase(), c.id);
+    }
+    for (const a of aliases) {
+      if (a.aliasName && a.chapterId) {
+        this.byName.set(a.aliasName.toLowerCase(), a.chapterId);
+      }
+    }
+  }
+
+  resolve(name: string, fallbackRegion: string = ""): string | null {
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) return null;
+    const key = trimmed.toLowerCase();
+    const existing = this.byName.get(key);
+    if (existing) return existing;
+    const id = chapterSlug(trimmed);
+    if (!id) return null;
+    if (!this.byId.has(id) && !this.pending.has(id)) {
+      this.pending.set(id, { id, name: trimmed, region: fallbackRegion || null });
+      this.byId.set(id, { id, name: trimmed, region: fallbackRegion || null });
+    }
+    this.byName.set(key, id);
+    return id;
+  }
+
+  get(id: string | null | undefined): ChapterRow | null {
+    if (!id) return null;
+    return this.byId.get(id) ?? null;
+  }
+
+  pendingChapters(): ChapterRow[] {
+    return [...this.pending.values()];
+  }
+}
+
+/** Loads chapters + aliases from Supabase and returns a ChapterResolver. */
+export async function loadResolver(
+  supabase: { from: (t: string) => { select: (cols: string) => Promise<{ data: unknown; error: unknown }> } },
+): Promise<ChapterResolver> {
+  const [chaptersR, aliasesR] = await Promise.all([
+    supabase.from("chapters").select("id, name, region"),
+    supabase.from("chapter_aliases").select("aliasName, chapterId"),
+  ]);
+  const chapters = (chaptersR.data as ChapterRow[] | null) ?? [];
+  const aliases = (aliasesR.data as ChapterAliasRow[] | null) ?? [];
+  return new ChapterResolver(chapters, aliases);
+}
+
+/** Flush any new chapters that resolve() created during the call. */
+export async function flushPendingChapters(
+  supabase: { from: (t: string) => { upsert: (rows: unknown[], opts: { onConflict: string }) => Promise<{ error: unknown }> } },
+  resolver: ChapterResolver,
+): Promise<void> {
+  const pending = resolver.pendingChapters();
+  if (pending.length === 0) return;
+  await supabase.from("chapters").upsert(
+    pending.map((c) => ({ id: c.id, name: c.name, region: c.region })),
+    { onConflict: "id" },
+  );
+}
+
 export async function fetchWAEvent(
   accessToken: string,
   accountId: string,

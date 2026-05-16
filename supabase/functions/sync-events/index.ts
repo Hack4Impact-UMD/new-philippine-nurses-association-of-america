@@ -45,6 +45,8 @@ async function fetchAllWAEvents(
 }
 
 function eventToRow(ev: Record<string, unknown>): EventRow {
+  // WA's /v2/events payload doesn't have a clean per-event chapter field, so
+  // chapterId is left null on insert and admins assign it via the app.
   return {
     id: String(ev.Id ?? ""),
     name: String(ev.Name ?? ""),

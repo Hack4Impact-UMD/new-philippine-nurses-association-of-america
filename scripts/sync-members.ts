@@ -12,9 +12,11 @@ import {
   getWAToken,
   getWAAccountId,
   mapContactToMember,
-  chapterSlug,
+  ChapterResolver,
   getEnv,
   type MemberData,
+  type ChapterRow,
+  type ChapterAliasRow,
 } from "./wa-utils.js";
 
 function sleep(ms: number): Promise<void> {
@@ -68,6 +70,7 @@ async function fetchAllWAContacts(
       console.error(`WA contacts page failed at skip=${skip}: ${r.statusText}`);
       break;
     }
+    console.log(`syncMembers: fetched contacts page at skip=${skip}`);
     const pageData = (await r.json()) as Record<string, unknown>;
     const contacts = (pageData.Contacts as Record<string, unknown>[]) || [];
     if (contacts.length === 0) break;
@@ -84,7 +87,7 @@ const COMPARE_FIELDS: (keyof MemberData)[] = [
   "email",
   "membershipLevel",
   "renewalDueDate",
-  "chapterName",
+  "chapterId",
   "highestEducation",
   "memberId",
   "region",
@@ -100,27 +103,50 @@ async function main() {
 
   const accessToken = await getWAToken();
   const accountId = getWAAccountId();
-  const now = new Date();
+
+  // Snapshot chapters + aliases up-front so we can resolve names → ids.
+  const [chaptersResult, aliasesResult] = await Promise.all([
+    supabase.from("chapters").select("id, name, region"),
+    supabase.from("chapter_aliases").select("aliasName, chapterId"),
+  ]);
+  if (chaptersResult.error) throw chaptersResult.error;
+  if (aliasesResult.error) throw aliasesResult.error;
+  const resolver = new ChapterResolver(
+    (chaptersResult.data ?? []) as ChapterRow[],
+    (aliasesResult.data ?? []) as ChapterAliasRow[]
+  );
 
   const rawContacts = await fetchAllWAContacts(accessToken, accountId);
   const allMembers: MemberData[] = [];
   for (const c of rawContacts) {
-    const m = mapContactToMember(c);
+    const m = mapContactToMember(c, resolver);
     if (m) allMembers.push(m);
   }
 
-  // Apply chapter override: Member-at-Large gets its own pseudo-chapter.
-  for (const m of allMembers) {
-    if (!m.chapterName && m.membershipLevel === "Member-at-Large (1 year)") {
-      m.chapterName = "PNA Member-at-Large";
-    }
+  // Persist any chapters the resolver invented for unknown names.
+  const newChapters = resolver.pendingChapters();
+  if (newChapters.length > 0) {
+    console.log(`syncMembers: creating ${newChapters.length} new chapter(s)`);
+    const { error } = await supabase
+      .from("chapters")
+      .upsert(
+        newChapters.map((c) => ({
+          id: c.id,
+          name: c.name,
+          region: c.region,
+        })),
+        { onConflict: "id" }
+      );
+    if (error) throw error;
   }
 
   // Read existing rows once so we only write the diff.
   console.log("syncMembers: reading existing members for diff...");
   const { data: existingRows, error: selErr } = await supabase
     .from("members")
-    .select("id, name, email, membershipLevel, renewalDueDate, chapterName, highestEducation, memberId, region, activeStatus");
+    .select(
+      "id, name, email, membershipLevel, renewalDueDate, chapterId, highestEducation, memberId, region, activeStatus"
+    );
   if (selErr) throw selErr;
   const existingMap = new Map<string, Record<string, unknown>>();
   for (const row of existingRows ?? []) {
@@ -153,47 +179,35 @@ async function main() {
     if (error) throw error;
   }
 
-  // Aggregate chapters in-memory from the WA snapshot
+  // Aggregate chapters in-memory from the WA snapshot.
+  const now = new Date();
   const chapterCounts: Record<
     string,
-    { totalMembers: number; totalActive: number; totalLapsed: number; region: string }
+    { totalMembers: number; totalActive: number; totalLapsed: number }
   > = {};
   for (const m of allMembers) {
-    if (!m.chapterName) continue;
-    if (!chapterCounts[m.chapterName]) {
-      chapterCounts[m.chapterName] = {
-        totalMembers: 0,
-        totalActive: 0,
-        totalLapsed: 0,
-        region: m.chapterName === "PNA Member-at-Large" ? "" : m.region,
-      };
+    if (!m.chapterId) continue;
+    if (!chapterCounts[m.chapterId]) {
+      chapterCounts[m.chapterId] = { totalMembers: 0, totalActive: 0, totalLapsed: 0 };
     }
-    chapterCounts[m.chapterName].totalMembers++;
+    chapterCounts[m.chapterId].totalMembers++;
     const isActive = m.renewalDueDate && new Date(m.renewalDueDate) >= now;
-    if (isActive) chapterCounts[m.chapterName].totalActive++;
-    else chapterCounts[m.chapterName].totalLapsed++;
+    if (isActive) chapterCounts[m.chapterId].totalActive++;
+    else chapterCounts[m.chapterId].totalLapsed++;
   }
 
-  // Zero out chapters that lost all members
-  const { data: existingChapters } = await supabase.from("chapters").select("id, name");
+  // Zero out chapters that lost all members.
+  const { data: existingChapters } = await supabase.from("chapters").select("id");
   const upserts: Array<Record<string, unknown>> = [];
   for (const c of existingChapters ?? []) {
-    const name = (c as { name: string }).name;
-    if (name && !chapterCounts[name]) {
-      upserts.push({
-        id: (c as { id: string }).id,
-        name,
-        totalMembers: 0,
-        totalActive: 0,
-        totalLapsed: 0,
-      });
+    const id = (c as { id: string }).id;
+    if (!chapterCounts[id]) {
+      upserts.push({ id, totalMembers: 0, totalActive: 0, totalLapsed: 0 });
     }
   }
-  for (const [chapterName, counts] of Object.entries(chapterCounts)) {
+  for (const [chapterId, counts] of Object.entries(chapterCounts)) {
     upserts.push({
-      id: chapterSlug(chapterName),
-      name: chapterName,
-      region: counts.region,
+      id: chapterId,
       totalMembers: counts.totalMembers,
       totalActive: counts.totalActive,
       totalLapsed: counts.totalLapsed,
@@ -209,19 +223,13 @@ async function main() {
     `(${allMembers.length} total), updated ${Object.keys(chapterCounts).length} chapters`;
   console.log(msg);
 
-  await supabase.from("sync_logs").insert({
-    type: "members",
-    status: "complete",
-  });
+  await supabase.from("sync_logs").insert({ type: "members", status: "complete" });
 }
 
 main().catch(async (err) => {
   console.error("syncMembers failed:", err);
   try {
-    const supabase = createClient(
-      getEnv("SUPABASE_URL"),
-      getEnv("SUPABASE_SERVICE_ROLE_KEY")
-    );
+    const supabase = createClient(getEnv("SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"));
     await supabase.from("sync_logs").insert({
       type: "members",
       status: "failed",

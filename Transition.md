@@ -499,20 +499,57 @@ The webhook handler's `runTransaction` + `syncLock` pattern translates well: do 
 
 ---
 
-## 8. Data Backfill — NOT DONE IN CODE
+## 8. Data Backfill
 
-**Status:** ⚠️ This is the biggest remaining manual step. The backfill script needs to be written and run before the first real cutover.
+**Status:** ✅ Script written. Run it once after Supabase is up.
 
-Run once, in this order, with the app in read-only mode (or before any frontend cutover):
+### How to run
 
-1. **users** — for every Firebase Auth user, create a corresponding `auth.users` row via the Supabase Admin API (`createUser` with `email_confirm: true` and `id` set to the same UUID if you want to preserve refs). Then copy each `users/{uid}` Firestore doc into `public.users`. Column names already match camelCase.
-2. **members** — export Firestore `members/*` to JSON, `insert` into `public.members` (column names already match).
-3. **chapters** — same pattern. Trust the aggregates from Firestore for the snapshot; the next nightly run will recompute.
-4. **subchapters** → **chapter_aliases** → **events** → **attendees** (FK order matters). The attendees subcollection becomes flat rows in `public.attendees`; each row needs `eventId` set to the parent event ID.
-5. **fundraising**.
-6. **Storage** — no migration needed; the event-poster feature was dropped (see §4).
+```bash
+cd scripts
+cp .env.example .env            # paste Firebase Admin + Supabase service-role creds
+npm install                     # installs firebase-admin
 
-Tools: a one-shot Node script using `firebase-admin` (read) + `@supabase/supabase-js` service-role client (write). Suggested location: `scripts/migrate/` (sibling to `scripts/sync-members.ts`). **Not yet written.**
+npm run migrate:dry-run         # read everything, print counts, write nothing
+npm run migrate                 # do the writes
+npm run migrate -- --only=members,events     # subset rerun
+npm run migrate -- --limit=50                # smoke test with a small slice
+```
+
+### What it does (in order — each step is one Firestore call)
+
+1. **users** — paginated `auth.listUsers()` walk + `firestore.collection('users').get()`. Creates `auth.users` rows preserving original Firebase UIDs (so `subchapters.createdBy` / `fundraising.createdBy` FKs survive). Upserts `public.users` profiles. Existing auth.users rows are skipped, not overwritten.
+2. **chapters** — `firestore.collection('chapters').get()` → upsert.
+3. **subchapters** — single get → upsert. FKs to `chapters` resolved by this point.
+4. **chapter_aliases** — single get → upsert.
+5. **members** — single get → upsert.
+6. **events** — single get → upsert.
+7. **attendees** — `firestore.collectionGroup('attendees').get()` — ONE query fetches every attendee across every event. The script extracts `eventId` from `doc.ref.parent.parent.id`. Rows whose parent event didn't make it into the migration set are dropped (logged).
+8. **fundraising** — single get → upsert.
+
+### Firebase read budget (worst case)
+
+For ~14k members, 500 events, 5k attendees, the script makes **8 Firestore queries total** (plus auth pagination). Each query streams; no per-row reads, no re-reads. Safely under any free-tier ceiling.
+
+### Idempotency
+
+Every Supabase write is an `upsert(rows, { onConflict: 'id' })`, so re-running the script is safe. `auth.users` creation handles "email already exists" errors and continues.
+
+### What it does NOT do
+- Storage backfill — the event-poster feature was dropped (see §4).
+- Custom `lastSynced`/`creationDate` overrides — defaults `now()` when the source doc didn't have one.
+- Schema validation — relies on the migrations (§2) already being applied.
+
+### Suggested cutover order
+
+1. Apply all SQL migrations (`supabase db push`).
+2. Run `npm run migrate:dry-run` against **staging** first; eyeball the counts.
+3. Run `npm run migrate` against staging; manually QA a few pages in the app.
+4. Run `npm run migrate:dry-run` against **production**; compare row counts to Firestore.
+5. Briefly freeze writes in the production app (or accept that anything written during the next ~5 minutes may need to be re-synced via the webhook handler).
+6. Run `npm run migrate` against production.
+7. Repoint Wild Apricot webhook → Supabase Edge Function.
+8. Trigger one `npm run sync-members` to make sure WA + Supabase are in sync.
 
 **Validation queries** to run after backfill:
 
@@ -586,7 +623,7 @@ Once you've gone two weeks without rolling back, decommission Firebase: disable 
 - [x] §5 Auth callback rewrite — code complete, and rewritten to use `admin.generateLink` + `verifyOtp` so we don't depend on the legacy shared JWT secret (forward-compatible with Supabase's new `sb_publishable_` / `sb_secret_` keys + asymmetric JWTs)
 - [x] §6 Frontend hooks + shim layer — code complete (no constraint rewrites needed thanks to the shim)
 - [x] §7 Edge Functions + pg_cron job + create-user API route + GitHub Actions sync-members — code complete
-- [ ] §8 Data backfill script — **not yet written; biggest remaining task**
+- [x] §8 Data backfill script — written at [scripts/migrate.ts](scripts/migrate.ts); single-pass Firestore reads, idempotent upserts, preserves Firebase UIDs
 - [ ] §9 Realtime audit — defer to post-cutover load testing
 - [x] §10 CI, README, .gitignore — code complete (still need to rotate the leaked service-account key + scrub from git history)
 - [ ] §11 Resolve open questions — UID continuity decision pending; sync-members timeout resolved; WA OAuth redirect URI unchanged
@@ -601,9 +638,9 @@ Once you've gone two weeks without rolling back, decommission Firebase: disable 
 5. Set Edge Function secrets (`WILD_APRICOT_API_KEY`, `WILD_APRICOT_ACCOUNT_ID`, `WEBHOOK_SECRET`).
 6. Set GitHub Actions secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `WILD_APRICOT_API_KEY`, `WILD_APRICOT_ACCOUNT_ID`).
 7. Set `pnaa/.env.local` from the new Supabase project + WA credentials.
-8. Write and run the backfill script (§8) against staging first; validate counts.
-9. Decide UID continuity strategy (§11 #3).
-10. Run backfill against prod (in read-only window).
+8. Run `cd scripts && cp .env.example .env`, fill in Firebase + Supabase creds, `npm install`.
+9. `npm run migrate:dry-run` against staging, verify counts, then `npm run migrate`. UID continuity is handled — Firebase UIDs are preserved.
+10. Repeat 9 against prod during a brief write freeze.
 11. Repoint Wild Apricot's webhook URL to the new Edge Function.
 12. Cut DNS / Vercel env vars over to the new Supabase project.
 13. Monitor for two weeks; then decommission Firebase.

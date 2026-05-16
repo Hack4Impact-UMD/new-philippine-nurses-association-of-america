@@ -5,7 +5,8 @@ export interface Member {
   email: string;
   membershipLevel: string;
   renewalDueDate: string;
-  chapterName: string;
+  /** FK to chapters.id — null when WA didn't report a chapter. */
+  chapterId: string | null;
   highestEducation: string;
   memberId: string;
   region: string;

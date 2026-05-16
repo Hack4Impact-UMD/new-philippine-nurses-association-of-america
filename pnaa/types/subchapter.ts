@@ -2,9 +2,8 @@ import { Timestamp } from "@/lib/supabase/timestamp";
 
 export interface Subchapter {
   name: string;
+  /** FK to chapters.id (required). */
   chapterId: string;
-  chapterName: string;
-  region: string;
   description: string;
   memberIds: string[];
   archived: boolean;

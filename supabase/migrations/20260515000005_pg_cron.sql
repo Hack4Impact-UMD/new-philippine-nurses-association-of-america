@@ -19,22 +19,29 @@ begin
       end,
       "lastSynced" = v_now;
 
-  -- Rebuild chapter aggregates from current member rows
+  -- Rebuild chapter aggregates from current member rows (joined by FK).
   update public.chapters c
   set "totalMembers" = coalesce(stats.total, 0),
       "totalActive"  = coalesce(stats.active, 0),
       "totalLapsed"  = coalesce(stats.lapsed, 0)
   from (
     select
-      "chapterName",
-      count(*)                                         as total,
+      "chapterId" as chapter_id,
+      count(*)                                          as total,
       count(*) filter (where "activeStatus" = 'Active') as active,
       count(*) filter (where "activeStatus" = 'Lapsed') as lapsed
     from public.members
-    where "chapterName" is not null
-    group by "chapterName"
+    where "chapterId" is not null
+    group by "chapterId"
   ) stats
-  where c."name" = stats."chapterName";
+  where c.id = stats.chapter_id;
+
+  -- Zero out chapters that no longer have any members.
+  update public.chapters
+  set "totalMembers" = 0, "totalActive" = 0, "totalLapsed" = 0
+  where id not in (
+    select distinct "chapterId" from public.members where "chapterId" is not null
+  );
 end;
 $$;
 

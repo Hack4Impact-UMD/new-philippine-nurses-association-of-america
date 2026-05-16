@@ -1,6 +1,15 @@
 -- PNAA Chapter Management — initial schema
 -- Mirrors the Firestore data model. Column names are camelCase (quoted) to
 -- keep the frontend code drop-in compatible.
+--
+-- Normalization rules:
+--   * Every reference to a chapter is `chapterId text references chapters(id)`.
+--     The id is the canonical slug. The display name lives in chapters.name.
+--   * Region is stored only on rows where it differs from the parent chapter:
+--     - chapters.region   — the source of truth
+--     - members.region    — WA reports per-member, can differ from chapter
+--     - users.region      — used to scope region_admin views
+--     Drop redundant region columns on events / subchapters — derive via join.
 
 create extension if not exists "pgcrypto";
 
@@ -12,23 +21,7 @@ create type public.user_role as enum (
   'member'
 );
 
--- ---------- subchapters (created early because events / fundraising FK it) ----------
-create table public.subchapters (
-  id uuid primary key default gen_random_uuid(),
-  "name" text not null,
-  "chapterId" text not null,
-  "chapterName" text,
-  "region" text,
-  "description" text,
-  "memberIds" text[] not null default '{}',
-  "archived" boolean not null default false,
-  "createdBy" uuid,
-  "lastUpdatedUser" text,
-  "createdAt" timestamptz not null default now(),
-  "lastUpdated" timestamptz not null default now()
-);
-
--- ---------- chapters ----------
+-- ---------- chapters (created first because everyone FKs it) ----------
 create table public.chapters (
   id text primary key,
   "name" text not null,
@@ -39,9 +32,19 @@ create table public.chapters (
   "lastUpdated" timestamptz not null default now()
 );
 
-alter table public.subchapters
-  add constraint subchapters_chapter_fk
-  foreign key ("chapterId") references public.chapters(id) on delete cascade;
+-- ---------- subchapters ----------
+create table public.subchapters (
+  id uuid primary key default gen_random_uuid(),
+  "name" text not null,
+  "chapterId" text not null references public.chapters(id) on delete cascade,
+  "description" text,
+  "memberIds" text[] not null default '{}',
+  "archived" boolean not null default false,
+  "createdBy" uuid,
+  "lastUpdatedUser" text,
+  "createdAt" timestamptz not null default now(),
+  "lastUpdated" timestamptz not null default now()
+);
 
 -- ---------- chapter aliases ----------
 create table public.chapter_aliases (
@@ -60,7 +63,7 @@ create table public.members (
   "email" text,
   "membershipLevel" text,
   "renewalDueDate" text,
-  "chapterName" text,
+  "chapterId" text references public.chapters(id) on delete set null,
   "highestEducation" text,
   "memberId" text,
   "region" text,
@@ -76,8 +79,7 @@ create table public.events (
   "startDate" text,
   "endDate" text,
   "location" text,
-  "chapter" text,
-  "region" text,
+  "chapterId" text references public.chapters(id) on delete set null,
   "archived" boolean not null default false,
 
   "eventType" text,
@@ -135,7 +137,7 @@ create table public.attendees (
 create table public.fundraising (
   id uuid primary key default gen_random_uuid(),
   "fundraiserName" text not null,
-  "chapterName" text,
+  "chapterId" text references public.chapters(id) on delete set null,
   "subchapterId" uuid references public.subchapters(id) on delete set null,
   "date" text,
   "amount" numeric(10,2) not null default 0,
@@ -152,7 +154,7 @@ create table public.users (
   "email" text not null,
   "displayName" text,
   "role" public.user_role not null default 'member',
-  "chapterName" text,
+  "chapterId" text references public.chapters(id) on delete set null,
   "region" text,
   "waContactId" text,
   "needsOnboarding" boolean not null default true,
@@ -180,7 +182,7 @@ create table public.sync_logs (
   "error" text
 );
 
--- ---------- generic updated_at trigger ----------
+-- ---------- generic lastUpdated trigger ----------
 create or replace function public.tg_set_last_updated()
 returns trigger language plpgsql as $$
 begin
@@ -202,7 +204,19 @@ create trigger subch_last_updated    before update on public.subchapters
 create trigger alias_last_updated    before update on public.chapter_aliases
   for each row execute function public.tg_set_last_updated();
 
--- attendees uses "updatedAt" instead of "lastUpdated"
+-- members table uses "lastSynced", not "lastUpdated" — drop the wrong trigger.
+drop trigger members_last_updated on public.members;
+create or replace function public.tg_set_last_synced()
+returns trigger language plpgsql as $$
+begin
+  new."lastSynced" := now();
+  return new;
+end;
+$$;
+create trigger members_last_synced before update on public.members
+  for each row execute function public.tg_set_last_synced();
+
+-- attendees uses "updatedAt"
 create or replace function public.tg_set_updated_at()
 returns trigger language plpgsql as $$
 begin
@@ -215,9 +229,9 @@ create trigger attendees_updated_at before update on public.attendees
   for each row execute function public.tg_set_updated_at();
 
 -- replica identity full so realtime + update triggers carry old row data
-alter table public.events     replica identity full;
+alter table public.events      replica identity full;
 alter table public.fundraising replica identity full;
-alter table public.attendees  replica identity full;
+alter table public.attendees   replica identity full;
 
 -- ---------- public.users row created on auth.users insert ----------
 create or replace function public.handle_new_auth_user()

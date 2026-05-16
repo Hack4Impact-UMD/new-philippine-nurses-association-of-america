@@ -33,14 +33,13 @@ export interface AppEvent {
   startDate: string;
   endDate: string;
   location: string;
-  chapter: string;
-  region: string;
+  /** FK to chapters.id — null for national / cross-chapter events. */
+  chapterId: string | null;
   archived: boolean;
 
   // Type / subtype
   eventType: EventType;
   eventSubtype: EventSubtype;
-  // Hours every attendee earns (conference: applied to all attendees; community outreach: prefill default).
   defaultHours: number;
 
   // Enrichment fields
@@ -55,11 +54,10 @@ export interface AppEvent {
   totalRevenue: number;
   volunteers: number;
   participantsServed: number;
-  // Sum of attendees' hours where attended === true. Maintained by the app on attendee writes.
   contactHours: number;
-  // Number of attendee docs with attended === true.
   attendedCount: number;
   volunteerHours: number;
+
   // Subchapter association (optional)
   subchapterId?: string;
 

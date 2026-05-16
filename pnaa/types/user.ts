@@ -6,7 +6,8 @@ export interface AppUser {
   email: string;
   displayName: string;
   role: UserRole;
-  chapterName?: string;
+  /** FK to chapters.id — set on first onboarding for chapter_admin / member. */
+  chapterId?: string | null;
   region?: string;
   needsOnboarding?: boolean;
   createdAt: Timestamp;

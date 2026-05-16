@@ -1,5 +1,5 @@
 // Wild Apricot utilities shared by the sync-members script and (logic mirrored
-// in supabase/functions/_shared for Deno Edge Functions).
+// in supabase/functions/_shared/wa.ts for Deno Edge Functions).
 
 export function getEnv(name: string): string {
   const v = process.env[name];
@@ -56,13 +56,98 @@ export function extractChapterName(
   return "";
 }
 
+export function chapterSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+// ---------- Chapter resolution ----------
+//
+// WA reports chapter NAMES; Supabase stores chapter IDs. A ChapterResolver
+// holds an in-memory snapshot of chapters + aliases and translates names
+// into canonical ids, creating new chapters on the fly when WA introduces
+// one we haven't seen.
+
+export interface ChapterRow {
+  id: string;
+  name: string;
+  region: string | null;
+}
+
+export interface ChapterAliasRow {
+  aliasName: string;
+  chapterId: string;
+}
+
+export class ChapterResolver {
+  /** id → ChapterRow */
+  private byId = new Map<string, ChapterRow>();
+  /** lowercased name OR alias → id */
+  private byName = new Map<string, string>();
+  /** Pending creates flushed by `pendingChapters()`. */
+  private pending = new Map<string, ChapterRow>();
+
+  constructor(chapters: ChapterRow[], aliases: ChapterAliasRow[]) {
+    for (const c of chapters) {
+      this.byId.set(c.id, c);
+      if (c.name) this.byName.set(c.name.toLowerCase(), c.id);
+    }
+    for (const a of aliases) {
+      if (a.aliasName && a.chapterId) {
+        this.byName.set(a.aliasName.toLowerCase(), a.chapterId);
+      }
+    }
+  }
+
+  /**
+   * Translate a free-form chapter name (from WA) to a chapter id. Returns
+   * null if `name` is empty. Creates a new chapter (queued in pending) if
+   * the name doesn't match any known chapter or alias.
+   */
+  resolve(name: string, fallbackRegion: string = ""): string | null {
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) return null;
+    const key = trimmed.toLowerCase();
+    const existing = this.byName.get(key);
+    if (existing) return existing;
+    const id = chapterSlug(trimmed);
+    if (!id) return null;
+    if (!this.byId.has(id) && !this.pending.has(id)) {
+      this.pending.set(id, { id, name: trimmed, region: fallbackRegion || null });
+      this.byId.set(id, { id, name: trimmed, region: fallbackRegion || null });
+    }
+    this.byName.set(key, id);
+    return id;
+  }
+
+  /** Look up a chapter by id (returns null if unknown). */
+  get(id: string | null | undefined): ChapterRow | null {
+    if (!id) return null;
+    return this.byId.get(id) ?? null;
+  }
+
+  /** Chapters newly created during resolve(); upsert these before referencing them. */
+  pendingChapters(): ChapterRow[] {
+    return [...this.pending.values()];
+  }
+
+  /** Convert a chapter id back to its display name (chapters table). */
+  nameFor(id: string | null | undefined): string {
+    return id ? (this.byId.get(id)?.name ?? "") : "";
+  }
+}
+
+// ---------- Member mapping ----------
+
 export type MemberData = {
   id: string;
   name: string;
   email: string;
   membershipLevel: string;
   renewalDueDate: string;
-  chapterName: string;
+  chapterId: string | null;
   highestEducation: string;
   memberId: string;
   region: string;
@@ -70,7 +155,14 @@ export type MemberData = {
   lastSynced: string;
 };
 
-export function mapContactToMember(contact: Record<string, unknown>): MemberData | null {
+/**
+ * Map a WA contact to a MemberData row. The resolver handles chapter name → id
+ * translation (and queues chapter creates internally for later upsert).
+ */
+export function mapContactToMember(
+  contact: Record<string, unknown>,
+  resolver: ChapterResolver
+): MemberData | null {
   const fieldValues =
     (contact.FieldValues as Array<{ FieldName: string; Value: unknown }>) || [];
   const isArchived = fieldValues.find((f) => f.FieldName === "Archived")?.Value === true;
@@ -88,24 +180,25 @@ export function mapContactToMember(contact: Record<string, unknown>): MemberData
       ? String((contact.MembershipLevel as { Name: unknown }).Name)
       : "";
 
+  // Member-at-Large gets pinned to a pseudo-chapter.
+  let chapterName = extractChapterName(fieldValues);
+  if (!chapterName && membershipLevel === "Member-at-Large (1 year)") {
+    chapterName = "PNA Member-at-Large";
+  }
+  const region = extractFieldValue(fieldValues, "PNAA Region");
+  const chapterId = resolver.resolve(chapterName, chapterName === "PNA Member-at-Large" ? "" : region);
+
   return {
     id: memberId,
     name: `${contact.FirstName ?? ""} ${contact.LastName ?? ""}`.trim(),
     email: String(contact.Email ?? ""),
     membershipLevel,
     renewalDueDate,
-    chapterName: extractChapterName(fieldValues),
+    chapterId,
     highestEducation: extractFieldValue(fieldValues, "Highest Level of Education"),
     memberId,
-    region: extractFieldValue(fieldValues, "PNAA Region"),
+    region,
     activeStatus,
     lastSynced: new Date().toISOString(),
   };
-}
-
-export function chapterSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
 }
