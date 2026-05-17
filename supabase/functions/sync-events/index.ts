@@ -63,92 +63,22 @@ async function syncOneEvent(
   accountId: string,
   evId: string,
 ): Promise<void> {
-  // Acquire per-event sync lock.
-  const { error: lockErr } = await supabase
-    .from("events")
-    .update({ syncLock: new Date().toISOString() })
-    .eq("id", evId);
-  if (lockErr) throw lockErr;
+  // Fetch WA registrations (paginated; this is the one network call we can't
+  // collapse into Postgres).
+  const regs = await fetchWAEventRegistrations(accessToken, accountId, evId);
 
-  try {
-    const regs = await fetchWAEventRegistrations(accessToken, accountId, evId);
-
-    // Fetch existing attendee rows for this event.
-    const { data: existingRows } = await supabase
-      .from("attendees")
-      .select("id, registrationId, source, attended, hours, contactId, memberId, name, registrationTypeId, registrationType, organization, isPaid, registrationFee, paidSum, OnWaitlist, Status")
-      .eq("eventId", evId);
-
-    const existingByRegId = new Map<string, Record<string, unknown>>();
-    for (const row of existingRows ?? []) {
-      existingByRegId.set((row as { registrationId: string }).registrationId, row as Record<string, unknown>);
-    }
-
-    const toUpsert: Record<string, unknown>[] = [];
-    const seenIds = new Set<string>();
-    for (const reg of regs) {
-      const id = reg.registrationId;
-      seenIds.add(id);
-      const existing = existingByRegId.get(id);
-      // Preserve attended/hours on existing rows.
-      toUpsert.push({
-        id,
-        registrationId: id,
-        eventId: evId,
-        contactId: reg.contactId,
-        memberId: reg.contactId,
-        name: reg.name,
-        attended: (existing?.attended as boolean) ?? false,
-        hours: (existing?.hours as number) ?? 0,
-        source: "wildapricot",
-        registrationTypeId: reg.registrationTypeId,
-        registrationType: reg.registrationType,
-        organization: reg.organization,
-        isPaid: reg.isPaid,
-        registrationFee: reg.registrationFee,
-        paidSum: reg.paidSum,
-        OnWaitlist: reg.OnWaitlist,
-        Status: reg.Status,
-      });
-    }
-
-    if (toUpsert.length > 0) {
-      const { error } = await supabase.from("attendees").upsert(toUpsert, { onConflict: "id" });
-      if (error) throw error;
-    }
-
-    // Delete WA attendees no longer in the registration list (preserve manual rows).
-    const orphans: string[] = [];
-    for (const row of existingRows ?? []) {
-      const r = row as { id: string; registrationId: string; source: string };
-      if (r.source === "wildapricot" && !seenIds.has(r.registrationId)) {
-        orphans.push(r.id);
-      }
-    }
-    if (orphans.length > 0) {
-      await supabase.from("attendees").delete().in("id", orphans);
-    }
-
-    // Recompute counters.
-    const registrations = regs.length;
-    const incompleteRegistrations = regs.filter((r) => !r.isPaid).length;
-    const totalRevenue = regs.reduce((acc, r) => acc + Number(r.paidSum ?? 0), 0);
-    const attendees = regs.length;
-
-    await supabase
-      .from("events")
-      .update({
-        registrations,
-        attendees,
-        incompleteRegistrations,
-        totalRevenue,
-      })
-      .eq("id", evId);
-  } finally {
-    await supabase
-      .from("events")
-      .update({ syncLock: null })
-      .eq("id", evId);
+  // Single RPC call replaces 6 round-trips (lock → select existing → upsert
+  // → delete orphans → counters → unlock). attended/hours on existing
+  // attendee rows are preserved by the RPC's "on conflict do update set …"
+  // which intentionally omits those columns.
+  const { error } = await supabase.rpc("sync_event_registrations", {
+    p_event_id: evId,
+    p_registrations: regs,
+  });
+  if (error) {
+    // Best-effort: clear sync lock if the RPC failed mid-flight.
+    await supabase.from("events").update({ syncLock: null }).eq("id", evId);
+    throw error;
   }
 }
 

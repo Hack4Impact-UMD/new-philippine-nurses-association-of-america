@@ -2,7 +2,9 @@
 
 A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, events, and fundraising campaigns. Built with Next.js and Supabase, integrated with Wild Apricot for membership data.
 
-> **Migration note:** This project was migrated off Firebase (Auth, Firestore, Storage, Cloud Functions) onto Supabase (Auth, Postgres, Edge Functions) in May 2026. The event-poster upload feature and its Firebase Storage bucket were dropped at the same time. See [Transition.md](Transition.md) for the full migration plan, what changed in each layer, and rollback procedure.
+> **Migration note (May 2026):** Moved off Firebase (Auth, Firestore, Storage, Cloud Functions) onto **Supabase** (Auth, Postgres, Edge Functions). At the same time the schema was **normalized** — every chapter reference is now a real foreign key (`chapterId`) rather than a duplicated chapter-name string. The event-poster upload feature was dropped, so Supabase Storage is not in scope. See [Transition.md](Transition.md) for the full migration plan, the post-deploy fixes (§13), and the rollback procedure.
+>
+> **First-user bootstrap:** new sign-ins land with role `member`. To promote the very first user to `national_admin`, run the SQL in [Transition.md §13.8](Transition.md). After that, the in-app `/users` page can promote everyone else.
 
 ---
 
@@ -29,7 +31,7 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - **Dashboard** — Real-time stats (total/active/lapsed members, chapters, upcoming events, total fundraised) plus chapter-list, fundraising-progress, and upcoming-events widgets
 - **Chapter Management** — Browse all chapters, view chapter-level member breakdowns and activity charts; chapter aliases merge stats from alternative Wild Apricot names
 - **Event Management** — Create, edit, and view events with type/subtype (Conference: In Person / Webinar; Community Outreach: Medical Mission / Health Screening / Volunteerism). Per-event attendee subcollection mixes Wild Apricot registrations with manually-added attendees. Admins toggle attendance and edit per-attendee hours; conferences apply a uniform `defaultHours` to all attended attendees, community outreach prefills it but lets admins override per person. Revenue figures and attendee payment amounts are gated to national admins.
-- **Member Directory** — Paginated `/members` listing with server-side prefix search (≥ 2 chars) and an "Active only" toggle. Per-member detail page shows total hours, events attended, and a breakdown of conference vs. community outreach hours, with a table of every event the member was marked attended on.
+- **Member Directory** — Paginated `/members` listing with case-insensitive substring search (Postgres `ILIKE`) and an "Active only" toggle. Per-member detail page shows total hours, events attended, and a breakdown of conference vs. community outreach hours, with a table of every event the member was marked attended on.
 - **Fundraising** — Track fundraising campaigns with amounts, notes, chapter and optional subchapter attribution; campaign trend chart on detail pages
 - **Subchapters** — Create subchapters within chapters, assign members, soft-delete support; events and fundraising can be tagged to a subchapter
 - **Member Sync** — Wild Apricot membership sync via real-time webhooks (Contact / Membership / MembershipRenewed / Event / EventRegistration). Manual full-sync HTTP endpoints (`syncMembers` is diff-aware — skips writes for unchanged docs) plus a daily 2 AM ET scheduled status recalculation (`updateMembers`) that only touches expired-renewal rows.
@@ -134,7 +136,7 @@ Authentication uses Wild Apricot OAuth 2.0 to identify users, then exchanges a S
    → Fetches user contact info from Wild Apricot API
    → Finds or creates auth.users row by email (Supabase Admin API)
    → Upserts public.users row (new users get needsOnboarding: true)
-   → Writes role / chapter_name / region into auth.users.app_metadata
+   → Writes role / chapter_id / region into auth.users.app_metadata
    → admin.auth.admin.generateLink({ type: 'magiclink', email })
    → supabase.auth.verifyOtp({ token_hash, type: 'magiclink' })
      ↳ Supabase issues a real session JWT and writes sb-* cookies on the response
@@ -474,7 +476,7 @@ The `attendees` table holds two kinds of records, distinguished by the `source` 
 - **`source: "wildapricot"`** — Synced from WA event registrations. Primary key is the WA registration ID. WA-managed fields (`name`, `registrationType`, `Status`, `paidSum`, etc.) are kept fresh by `sync-events` and the webhook. App-managed fields (`attended`, `hours`) are preserved across syncs by reading the existing row before upsert.
 - **`source: "app"`** — Added by an admin from the event detail page. Primary key is `app-{memberId}` so the same member can't be added twice. Always `attended: true` on creation. Linked to a `public.members` row via `memberId`.
 
-The Add Attendee dialog requires the admin to pick from existing members (server-side prefix search, ≥ 2 chars, scoped to active members and optionally to the event's chapter). It refuses to add a member who is already on the event in either section.
+The Add Attendee dialog requires the admin to pick from existing members (server-side `ILIKE` substring search, scoped to active members and optionally to the event's chapter). It refuses to add a member who is already on the event in either section.
 
 ### Per-Member Hours Rollup
 
@@ -495,7 +497,7 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 | Technique | Where | Impact |
 |---|---|---|
 | **Server-side cursor pagination** | `/members` listing, event attendee list (WA section) | A `/members` visit reads ~50 rows instead of 14k. A 2000-attendee conference detail page reads ~50 instead of 2000. |
-| **Server-side prefix search** (min 2 chars) | `/members` search bar, AddManualAttendeeDialog member picker | Searches read ≤ 25–50 matching rows, never the full table. Uses indexes on `("activeStatus","name")` and `("activeStatus","chapterName","name")`. |
+| **Server-side `ILIKE` substring search** | `/members` search bar, AddManualAttendeeDialog member picker | Case-insensitive substring matching with no minimum-length gate. Active-only paths use the `(activeStatus, name)` and `(activeStatus, chapterId, name)` indexes. |
 | **Lazy-mount dialogs** | `AddManualAttendeeDialog` body | Prevents the dialog's member-search hook from running on every event-detail page load. The hook only fires after the admin opens the dialog. |
 | **One-shot select** instead of Realtime channel | `/members` lists, chapter list / detail (members + aliases), member detail page | Slow-changing tables don't need live listeners. Saves channel overhead. Implemented via `useCollectionOnce` / `useDocumentOnce` in [hooks/use-firestore.ts](pnaa/hooks/use-firestore.ts). |
 | **Optimistic local updates** | Attendee list (toggle attended, edit hours, add/remove manual) | Admin actions update local state immediately; Postgres write happens in the background with rollback on failure. No re-fetch needed after the write. |
@@ -522,11 +524,11 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
   name: string
   email: string
   membershipLevel: string
-  renewalDueDate: string
-  chapterName: string
+  renewalDueDate: string         // text — WA sends ISO 8601 strings, not timestamptz
+  chapterId: string | null       // FK → chapters.id; resolved from WA name via ChapterResolver
   highestEducation: string
   memberId: string               // From WA custom field, fallback: WA contact ID
-  region: string
+  region: string                 // PNAA Region — independent of the chapter's region
   activeStatus: "Active" | "Lapsed"
   lastSynced: Timestamp
 }
@@ -537,13 +539,12 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 {
   id: string
   name: string
-  startDate: string
-  endDate: string
+  startDate: string              // text (WA ISO string)
+  endDate: string                // text
   startTime: string
   endTime: string
   location: string
-  chapter: string
-  region: string
+  chapterId: string | null       // FK → chapters.id; null for national / cross-chapter events
   about: string
   archived: boolean
 
@@ -607,9 +608,9 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 ```typescript
 {
   fundraiserName: string
-  chapterName: string
+  chapterId: string | null       // FK → chapters.id; null for national campaigns
   subchapterId?: string
-  date: string
+  date: string                   // text (ISO 8601)
   amount: number
   note: string
   archived: boolean
@@ -622,9 +623,10 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 ### Chapter
 ```typescript
 {
-  name: string
-  region: string
-  totalMembers: number
+  id: string                     // canonical slug, e.g. "pna-metro-houston"
+  name: string                   // display name
+  region: string                 // source of truth for chapter's region
+  totalMembers: number           // aggregate; rebuilt by sync-members and pg_cron
   totalActive: number
   totalLapsed: number
   lastUpdated: Timestamp
@@ -635,18 +637,17 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 ```typescript
 {
   name: string
-  chapterId: string
-  chapterName: string
-  region: string
+  chapterId: string              // FK → chapters.id; required
   description: string
   memberIds: string[]
   archived: boolean
-  createdBy: string
+  createdBy: string              // uuid (auth.users.id)
   lastUpdatedUser: string
   createdAt: Timestamp
   lastUpdated: Timestamp
 }
 ```
+> No `chapterName` or `region` columns — both derive via join on `chapterId`.
 
 ### Chapter Alias
 ```typescript
@@ -663,12 +664,13 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 ### User
 ```typescript
 {
+  id: string                     // uuid, references auth.users.id
   email: string
   displayName: string
   role: "national_admin" | "region_admin" | "chapter_admin" | "member"
-  chapterName?: string
-  region?: string
-  needsOnboarding?: boolean  // true for new users until they complete /setup
+  chapterId?: string | null      // FK → chapters.id; set on /setup for chapter_admin / member
+  region?: string                // used to scope region_admin views
+  needsOnboarding?: boolean      // true for new users until they complete /setup
   waContactId?: string
   createdAt: Timestamp
   lastLogin: Timestamp

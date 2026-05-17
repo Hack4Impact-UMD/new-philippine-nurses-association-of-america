@@ -1,6 +1,6 @@
 # Firebase → Supabase Migration Plan
 
-> **Status (2026-05-15):** Code migration complete on branch `ChaseFournier/Switch-to-Supabase`. The event-poster upload feature was dropped during the migration (see §4), so Supabase Storage is **not** in scope. The runtime / cloud-side steps (creating Supabase projects, populating env vars, running the backfill script, repointing the WA webhook, rotating the leaked service-account key) still need to be done by hand. See the §-by-§ checkboxes for what is and isn't done in code.
+> **Status (2026-05-16):** Code migration complete on branch `ChaseFournier/Switch-to-Supabase`. Project deployed to one Supabase environment; sync-members + sign-in + member listing all working end-to-end. See **§13 Post-deploy fixes** for the issues hit during first-run testing and how each was resolved. The event-poster upload feature was dropped during the migration (see §4), so Supabase Storage is **not** in scope. Remaining cloud-side steps: standing up a second (staging) project, repointing the WA webhook, rotating the leaked service-account key.
 
 This document is the complete punch list for moving the PNAA Chapter Management System off Firebase (Auth, Firestore, Storage, Cloud Functions) onto Supabase (Auth, Postgres, Edge Functions). It is organized so each section can be worked through in order, with no hidden cross-cutting surprises.
 
@@ -621,13 +621,15 @@ Action: convert highest-traffic listeners (members table, attendees table) to **
 
 ## 11. Risks & Open Questions
 
-1. ~~**`syncMembers` 720s timeout.**~~ **Resolved:** runs as a GitHub Actions cron + local npm script instead of an Edge Function (see §7.4). Bears watching only if Wild Apricot's async-job latency grows past GitHub Actions' 6-hour ceiling, which is implausible at current scale.
-2. **Webhook ordering.** The current handler has carefully tuned exponential-backoff retry and pending-registration queueing for out-of-order WA delivery. Reproduce this exactly — it's load-bearing for data correctness during membership renewals.
-3. **UID continuity.** Decide whether to preserve Firebase UIDs as Supabase `auth.users.id`. Preserving them means cleaner FKs but requires careful Admin API use during backfill. Not preserving them means a `wa_contact_id`-based remap and possibly broken `created_by` references on existing fundraising/subchapter rows.
-4. **Real-time listener load.** 399 onSnapshot sites at 14k members and 55+ chapters is an unusual amount of fanout. Audit aggressively for opportunities to switch to one-shot fetches; Supabase pricing on realtime messages can surprise.
-5. **Wild Apricot OAuth client config.** The redirect URI registered with WA must be updated when the callback URL changes. If the new callback path is the same (`/api/auth/callback`), no WA-side change is needed.
-6. **Composite index on collection group `attendees`.** This becomes a regular B-tree on a flat table — much simpler. But verify any code path that did a `collectionGroup('attendees')` query is rewritten as `from('attendees')` rather than nested-table joins.
-7. **No tests.** Per project memory, the codebase has zero tests. Strongly consider adding integration tests for at least the auth callback and the webhook handler before cutover — they are the two highest-blast-radius components.
+1. ~~**`syncMembers` 720s timeout.**~~ **Resolved:** runs as GitHub Actions cron + local npm script (§7.4).
+2. **Webhook ordering.** The handler has tuned out-of-order delivery handling via `pending_registrations`. Reproduce this exactly — load-bearing for data correctness during membership renewals.
+3. ~~**UID continuity.**~~ **Resolved:** `scripts/migrate.ts` preserves Firebase UIDs as `auth.users.id` via the Admin API. Existing `createdBy` FKs continue to work.
+4. **Real-time listener load.** Audit aggressively. Most member/chapter lists use `useCollectionOnce` (one-shot). Realtime is reserved for dashboards and event detail.
+5. **Wild Apricot OAuth client config.** The redirect URI registered with WA must match `/api/auth/callback` — unchanged from the old setup, so no WA-side change needed.
+6. **Composite index on collection group `attendees`** — replaced by a flat-table `(memberId, attended)` index. Verify any code that did `collectionGroup('attendees')` is now `from('attendees')`.
+7. **No tests.** Codebase has zero tests. Add integration tests for at least the auth callback and the webhook handler before broader rollout.
+8. **`auth.admin.listUsers` pagination.** The OAuth callback uses `listUsers({ page: 1, perPage: 200 })` to find existing users by email. Switch to paginated walks (or `getUserByEmail` when it ships) before user count crosses ~150.
+9. **First-user bootstrap.** No self-service path to promote the first user from `member` → `national_admin`. Documented manual SQL in §13.8.
 
 ---
 
@@ -640,6 +642,71 @@ Keep the Firebase project running and the Cloud Functions deployed for **at leas
 3. Replay any Supabase-only writes back into Firestore from a diff query (the `updated_at` columns make this tractable).
 
 Once you've gone two weeks without rolling back, decommission Firebase: disable Cloud Functions, export Firestore as a final backup, delete the project.
+
+---
+
+## 13. Post-deploy fixes (lessons from first-run testing)
+
+After applying the migrations and running the first `sync-members` + sign-in, several issues surfaced. All have been resolved on this branch; documenting them here so future deploys don't re-step on the same rakes.
+
+### 13.1 Wrong trigger on `members`
+- **Symptom:** `record "new" has no field "lastUpdated"` on any UPDATE to `public.members`.
+- **Cause:** the generic `tg_set_last_updated()` trigger was originally attached to every table, but `members` uses `lastSynced` (not `lastUpdated`).
+- **Fix:** [supabase/migrations/20260515000001_schema.sql](supabase/migrations/20260515000001_schema.sql) now defines a separate `tg_set_last_synced()` function and attaches `members_last_synced` to `members`. The bad trigger is no longer created.
+- **Manual unblock on a pre-existing DB:** `drop trigger if exists members_last_updated on public.members;`
+
+### 13.2 Chapter aggregate upsert violating `chapters.name NOT NULL`
+- **Symptom:** `null value in column "name" of relation "chapters"` at the end of `sync-members`.
+- **Cause:** the aggregate upsert at the end of `sync-members.ts` sent only `{id, totalMembers, …}`. When PostgREST took the INSERT path (chapter row didn't exist yet, or an earlier broken run left an orphan), the missing `name` violated NOT NULL.
+- **Fix:** [scripts/sync-members.ts](scripts/sync-members.ts) now pulls canonical `name` + `region` from the resolver for every aggregate upsert. Also restored a missing closing brace on the WA-contacts pagination loop.
+- **Bonus fix:** `ChapterResolver.resolve()` now back-fills `name`/`region` if it sees an existing chapter row with a null name — so re-running sync repairs damage from earlier partial runs.
+
+### 13.3 `dateString.split is not a function`
+- **Symptom:** error on the events / members / fundraising pages.
+- **Cause:** the Timestamp-hydration regex was too greedy — fields like `startDate`, `endDate`, `renewalDueDate`, `startTime`, `endTime` are stored as **text** (WA sends them as strings) but matched the `Date|Time|…` regex and were being wrapped in `Timestamp` instances. Then `formatDate()`/`parseISO()` tried `.split(…)` on a Timestamp and crashed.
+- **Fix:** [pnaa/lib/supabase/timestamp.ts](pnaa/lib/supabase/timestamp.ts) replaced the regex with an explicit `TIMESTAMP_COLUMNS` allowlist of the columns that are actually `timestamptz` in the schema. Plain string date columns now pass through untouched.
+
+### 13.4 Setup page submitted chapter name instead of chapter id
+- **Symptom:** "Unknown chapter" error on first-time onboarding.
+- **Cause:** `<SelectItem value={c.name}>` left over from the pre-normalization code. The page state variable was renamed to `chapterId` but the dropdown still wrote the *name* into it.
+- **Fix:** [pnaa/app/(auth)/setup/page.tsx](pnaa/app/(auth)/setup/page.tsx) — `value={c.id}` (display still `c.name`).
+
+### 13.5 Chapter column showing "—" on member list (but worked on member detail)
+- **Symptom:** members page Chapter column blank; clicking into a member showed the chapter correctly.
+- **Cause:** `useMemo` with `[]` deps captured `nameFor` from `useChaptersMap()` before the chapters fetch completed; the empty-map version stayed sticky forever.
+- **Fix:** Always include `nameFor` / `regionFor` / `chapters` in the deps of any `useMemo` that builds columns or row data. Same fix applied in [pnaa/components/members/member-list.tsx](pnaa/components/members/member-list.tsx), [pnaa/components/users/user-list.tsx](pnaa/components/users/user-list.tsx), and [pnaa/components/members/member-detail.tsx](pnaa/components/members/member-detail.tsx).
+
+### 13.6 Search filters crashing on null fields
+- **Symptom:** `Cannot read properties of null (reading 'toLowerCase')`.
+- **Cause:** chapter/event filters called `chapter.region.toLowerCase()` etc. directly; nullable columns (`chapter.region`, `event.location`) would throw.
+- **Fix:** Each list-page filter now uses an `lc(v) = (v ?? "").toLowerCase()` helper. Touched [chapter-list.tsx](pnaa/components/chapters/chapter-list.tsx), [event-list.tsx](pnaa/components/events/event-list.tsx), [campaign-list.tsx](pnaa/components/fundraising/campaign-list.tsx), [subchapter-detail.tsx](pnaa/components/subchapters/subchapter-detail.tsx).
+
+### 13.7 `addDocument` schema-cache error on `chapter_aliases`
+- **Symptom:** `Could not find the 'creationDate' column of 'chapter_aliases' in the schema cache`.
+- **Cause:** `addDocument` auto-injected `creationDate` + `lastUpdated` on every insert. Works for events/fundraising/subchapters, breaks on `chapter_aliases` (`createdAt`), `members` (`lastSynced`), `users` (`createdAt`/`lastLogin`), `attendees` (`createdAt`/`updatedAt`).
+- **Fix:** [pnaa/lib/supabase/firestore.ts](pnaa/lib/supabase/firestore.ts) `addDocument` no longer auto-injects timestamps. Postgres column defaults (`now()`) and per-table BEFORE-UPDATE triggers handle them. Callers can still pass them explicitly to override.
+
+### 13.8 First user can't bootstrap themselves to national_admin
+- **Symptom:** `new row violates row-level security policy for table "chapter_aliases"` (or any admin-only write) for the first user.
+- **Cause:** Every new sign-in lands with role `member`. Only `national_admin`/`region_admin` can create aliases. There's no in-app self-promotion path.
+- **Fix (manual SQL, one-time):**
+  ```sql
+  update public.users set role = 'national_admin' where email = 'you@example.com';
+  update auth.users
+  set raw_app_meta_data =
+        coalesce(raw_app_meta_data, '{}'::jsonb)
+        || jsonb_build_object('user_role', 'national_admin')
+  where email = 'you@example.com';
+  ```
+  Sign out + back in for a fresh JWT. After that, the `/users` page can promote others via the API.
+
+### 13.9 Stray lockfile at the repo root broke Next dev server
+- **Symptom:** `Can't resolve 'tailwindcss' in '/.../philippine-nurses-association-of-america'` (note: repo root, not `pnaa/`).
+- **Cause:** A `package-lock.json` got created at the repo root (likely an accidental `npm` invocation up a directory). Next.js 16's auto-workspace detection treats lockfiles as workspace-root markers and started resolving modules from the repo root instead of `pnaa/`.
+- **Fix:** delete any `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` above `pnaa/`. Don't run `npm` from the repo root.
+
+### 13.10 Search restrictions relaxed
+- The old "minimum 2 characters" gate (Firestore prefix-only search limitation) was removed from the member list and the Add Attendee dialog. Both now use Postgres `ILIKE '%term%'` for case-insensitive **substring** search, no minimum length. Implemented by adding `like`/`ilike` to the `WhereOp` union in [pnaa/lib/supabase/query.ts](pnaa/lib/supabase/query.ts).
 
 ---
 
