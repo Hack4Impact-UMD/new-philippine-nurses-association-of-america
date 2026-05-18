@@ -12,7 +12,6 @@ import {
   type DocumentSnapshot,
   type QueryConstraint,
 } from "@/lib/supabase/firestore";
-import { db } from "@/lib/supabase/client";
 import {
   AdvancedDataTable,
   type ColumnDef,
@@ -91,7 +90,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     if (startCursor) constraints.push(startAfter(startCursor));
     constraints.push(fsLimit(WA_PAGE_SIZE + 1)); // +1 to detect more
 
-    getDocs(query(collection(db, "events", event.id, "attendees"), ...constraints))
+    getDocs(query(collection("events", event.id, "attendees"), ...constraints))
       .then((snap) => {
         if (cancelled) return;
         const docs = snap.docs;
@@ -134,7 +133,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     try {
       const snap = await getDocs(
         query(
-          collection(db, "events", event.id, "attendees"),
+          collection("events", event.id, "attendees"),
           where("source", "==", "app"),
           orderBy("name")
         )
@@ -656,7 +655,7 @@ function AddManualAttendeeDialogBody({
     constraints.push(orderBy("name"));
     constraints.push(fsLimit(25));
 
-    getDocs(query(collection(db, "members"), ...constraints))
+    getDocs(query(collection("members"), ...constraints))
       .then((snap) => {
         if (cancelled) return;
         setResults(

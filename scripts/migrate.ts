@@ -168,7 +168,11 @@ async function migrateUsers(): Promise<CollectionResult> {
     }
     const profile = profileByUid.get(uid) ?? {};
     const role = (profile.role as string) ?? "member";
-    const chapterName = (profile.chapterName as string | undefined) ?? null;
+    // (#5) Firestore stored the chapter as free-text `chapterName`; Postgres
+    // FKs against chapters by id. Users migrate before chapters so we can't
+    // safely resolve here — leave chapterId null and let admins/setup assign
+    // it after the chapters table is populated.
+    const chapterId = (profile.chapterId as string | undefined) ?? null;
     const region = (profile.region as string | undefined) ?? null;
 
     if (!DRY_RUN) {
@@ -182,8 +186,8 @@ async function migrateUsers(): Promise<CollectionResult> {
         user_metadata: { displayName },
         app_metadata: {
           user_role: role,
-          ...(chapterName ? { chapter_name: chapterName } : {}),
-          ...(region ? { region } : {}),
+          chapter_id: chapterId ?? null,
+          region: region ?? null,
         },
       } as Parameters<typeof supabase.auth.admin.createUser>[0] & { id: string };
       const { error: createErr } = await supabase.auth.admin.createUser(createPayload);
@@ -202,7 +206,7 @@ async function migrateUsers(): Promise<CollectionResult> {
       email,
       displayName,
       role,
-      chapterName,
+      chapterId,
       region,
       waContactId: profile.waContactId ?? null,
       needsOnboarding: profile.needsOnboarding ?? false,

@@ -13,9 +13,7 @@ import { hydrateTimestamps } from "@/lib/supabase/timestamp";
 import type { AppUser } from "@/types/user";
 
 interface AuthContextType {
-  // Kept as `firebaseUser` for backwards-compat with callers that still
-  // reference this field. It's a Supabase user now.
-  firebaseUser: SupabaseUser | null;
+  authUser: SupabaseUser | null;
   user: (AppUser & { uid: string }) | null;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -24,7 +22,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({
-  firebaseUser: null,
+  authUser: null,
   user: null,
   isLoading: true,
   isAuthenticated: false,
@@ -97,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        firebaseUser: authUser,
+        authUser,
         user,
         isLoading,
         isAuthenticated: !!user,

@@ -20,17 +20,3 @@ export function getSupabaseBrowser(): SupabaseClient {
   );
   return _client;
 }
-
-// Lazy singleton — matches the `auth` / `db` / `storage` export shape that the
-// rest of the codebase imports.
-export const supabase = new Proxy({} as SupabaseClient, {
-  get(_, prop) {
-    return (getSupabaseBrowser() as unknown as Record<string | symbol, unknown>)[prop];
-  },
-});
-
-// Compatibility aliases — callers used to import { auth, db } from
-// the old firebase config. They are the same Supabase client now, but
-// we keep the names so call sites don't need to change.
-export const auth = supabase;
-export const db = supabase;

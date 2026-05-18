@@ -90,6 +90,7 @@ const COMPARE_FIELDS: (keyof MemberData)[] = [
   "chapterId",
   "highestEducation",
   "memberId",
+  "contactId",
   "region",
   "activeStatus",
 ];
@@ -145,7 +146,7 @@ async function main() {
   const { data: existingRows, error: selErr } = await supabase
     .from("members")
     .select(
-      "id, name, email, membershipLevel, renewalDueDate, chapterId, highestEducation, memberId, region, activeStatus"
+      "id, name, email, membershipLevel, renewalDueDate, chapterId, highestEducation, memberId, contactId, region, activeStatus"
     );
   if (selErr) throw selErr;
   const existingMap = new Map<string, Record<string, unknown>>();
