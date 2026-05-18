@@ -7,13 +7,18 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 /**
  * Wild Apricot OAuth callback → Supabase session.
  *
- * Flow:
+ * Instead of minting our own HS256 JWT with the legacy SUPABASE_JWT_SECRET,
+ * we use the canonical "trusted third-party OAuth" pattern:
+ *
  *   1. Validate WA state, exchange code, fetch the user's WA contact.
- *   2. Find-or-create auth.users by email (paginated lookup).
- *   3. Upsert public.users; new rows get needsOnboarding = true.
- *   4. Merge user_role / chapter_id / region into auth.users.app_metadata
- *      so the JWT carries them for RLS.
- *   5. Generate + redeem a magic-link token_hash to set sb-* cookies.
+ *   2. Find or create the auth.users row via the Admin API.
+ *   3. Upsert public.users and write app_metadata (user_role / chapter_name / region).
+ *   4. Generate a one-shot magic-link token_hash via admin.generateLink.
+ *   5. Redeem it server-side with auth.verifyOtp on a cookie-bound client —
+ *      this writes the sb-access-token / sb-refresh-token cookies for us.
+ *
+ * This works with the new asymmetric-JWT signing keys when they roll out
+ * because we never touch the JWT secret ourselves.
  */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -33,36 +38,27 @@ export async function GET(request: NextRequest) {
   cookieStore.delete("wa_oauth_state");
 
   try {
+    // 1. Exchange WA code → access token → contact info
     const { access_token } = await exchangeCodeForToken(code);
     const contact = await getContactInfo(access_token);
     const email = contact.Email;
     const displayName = `${contact.FirstName} ${contact.LastName}`.trim();
-    const emailLower = email.toLowerCase();
 
+    // 2. Find or create the auth.users row.
     const admin = supabaseAdmin();
-
-    // (#1) Find existing auth.users by email — paginate through every page,
-    // not just the first 200. listUsers caps perPage at 1000.
     let authUserId: string | undefined;
-    const LIST_PER_PAGE = 1000;
-    for (let page = 1; ; page++) {
-      const { data, error: listErr } = await admin.auth.admin.listUsers({
-        page,
-        perPage: LIST_PER_PAGE,
-      });
-      if (listErr) throw listErr;
-      const match = data.users.find(
-        (u: { id: string; email?: string | null }) =>
-          u.email?.toLowerCase() === emailLower
-      );
-      if (match) {
-        authUserId = match.id;
-        break;
-      }
-      if (data.users.length < LIST_PER_PAGE) break;
-    }
 
-    if (!authUserId) {
+    const { data: existingByEmail } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 200,
+    });
+    const found = existingByEmail.users.find(
+      (u: { id: string; email?: string | null }) =>
+        u.email?.toLowerCase() === email.toLowerCase()
+    );
+    if (found) {
+      authUserId = found.id;
+    } else {
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
         email_confirm: true,
@@ -73,17 +69,14 @@ export async function GET(request: NextRequest) {
     }
     if (!authUserId) throw new Error("Could not resolve auth user");
 
-    // (#2) Decide first-time setup from needsOnboarding, not from row presence.
-    // The `on_auth_user_created` trigger creates the row immediately, so the
-    // previous `isNewUser = !existing` check was structurally always false.
+    // 3. Upsert the public.users profile and read the persisted role.
     const { data: existing } = await admin
       .from("users")
-      .select("role, chapterId, region, needsOnboarding")
+      .select("role, chapterId, region")
       .eq("id", authUserId)
       .maybeSingle();
 
-    const needsOnboarding =
-      (existing as { needsOnboarding?: boolean } | null)?.needsOnboarding ?? true;
+    const isNewUser = !existing;
     const role: string =
       (existing as { role?: string } | null)?.role ?? "member";
     const chapterId: string | null =
@@ -91,9 +84,7 @@ export async function GET(request: NextRequest) {
     const region: string | null =
       (existing as { region?: string } | null)?.region ?? null;
 
-    if (!existing) {
-      // Trigger should have created this; fall back to an explicit insert in
-      // case the trigger ever gets dropped.
+    if (isNewUser) {
       const { error: insErr } = await admin.from("users").insert({
         id: authUserId,
         email,
@@ -101,6 +92,8 @@ export async function GET(request: NextRequest) {
         role: "member",
         waContactId: String(contact.Id),
         needsOnboarding: true,
+        createdAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
       });
       if (insErr) throw insErr;
     } else {
@@ -115,18 +108,17 @@ export async function GET(request: NextRequest) {
         .eq("id", authUserId);
     }
 
-    // (#7) Merge claims into existing app_metadata instead of replacing it.
-    const { data: authUser } = await admin.auth.admin.getUserById(authUserId);
-    const prevMeta = (authUser?.user?.app_metadata ?? {}) as Record<string, unknown>;
+    // 4. Mirror role/chapter/region into auth.users.app_metadata so the
+    //    Supabase-issued JWT carries them and RLS works.
     await admin.auth.admin.updateUserById(authUserId, {
       app_metadata: {
-        ...prevMeta,
         user_role: role,
-        chapter_id: chapterId,
-        region: region,
+        ...(chapterId ? { chapter_id: chapterId } : {}),
+        ...(region ? { region } : {}),
       },
     });
 
+    // 5. Get a one-shot magic-link token for this user.
     const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email,
@@ -135,8 +127,10 @@ export async function GET(request: NextRequest) {
     const tokenHash = linkData.properties?.hashed_token;
     if (!tokenHash) throw new Error("generateLink returned no token_hash");
 
+    // 6. Redeem the token on a cookie-bound client so the sb-* cookies are
+    //    written to our redirect response.
     const response = NextResponse.redirect(
-      needsOnboarding ? `${appUrl}/setup` : `${appUrl}/dashboard`
+      isNewUser ? `${appUrl}/setup` : `${appUrl}/dashboard`
     );
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,

@@ -114,30 +114,16 @@ Deno.serve(async (req) => {
     console.log(`sync-events: inserted ${newRows.length} new events`);
 
     // Sync registrations for every event, chunked 3 at a time.
-    // (#19) Catch per-event so one locked or transiently-failing event
-    // doesn't abort the whole batch — the syncLock RPC now raises when
-    // another in-flight run holds the lock.
     const allIds = rawEvents.map((ev) => String(ev.Id));
     let processed = 0;
-    let skipped = 0;
     for (let i = 0; i < allIds.length; i += 3) {
       const batch = allIds.slice(i, i + 3);
-      const results = await Promise.allSettled(
+      await Promise.all(
         batch.map((id) => syncOneEvent(supabase, accessToken, accountId, id)),
       );
-      for (let j = 0; j < results.length; j++) {
-        const r = results[j];
-        if (r.status === "rejected") {
-          skipped++;
-          console.warn(`sync-events: skipped event ${batch[j]}: ${r.reason}`);
-        } else {
-          processed++;
-        }
-      }
+      processed += batch.length;
     }
-    console.log(
-      `sync-events: synced registrations for ${processed} events (skipped ${skipped})`,
-    );
+    console.log(`sync-events: synced registrations for ${processed} events`);
 
     await supabase.from("sync_logs").insert({ type: "events", status: "complete" });
 

@@ -15,16 +15,6 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const response = NextResponse.next({ request });
 
-  // (#18) Skip the session refresh on /signin when no Supabase cookie is
-  // present. Most signin loads are unauthenticated users; touching getUser()
-  // for them adds latency to the only public page.
-  const hasSupabaseCookie = request.cookies
-    .getAll()
-    .some((c) => c.name.startsWith("sb-"));
-  if (pathname === "/signin" && !hasSupabaseCookie) {
-    return response;
-  }
-
   // Build a request-scoped Supabase client that can refresh the session and
   // write rotated cookies back to the response.
   const supabase = createServerClient(

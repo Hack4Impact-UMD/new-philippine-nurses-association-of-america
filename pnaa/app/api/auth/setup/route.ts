@@ -45,11 +45,8 @@ export async function POST(request: NextRequest) {
     if (updErr) throw updErr;
 
     const role = (userRow as { role: string }).role;
-    // (#7) Merge into existing app_metadata so unrelated claims survive.
-    const { data: authUser } = await admin.auth.admin.getUserById(uid);
-    const prevMeta = (authUser?.user?.app_metadata ?? {}) as Record<string, unknown>;
     await admin.auth.admin.updateUserById(uid, {
-      app_metadata: { ...prevMeta, user_role: role, chapter_id: chapterId, region },
+      app_metadata: { user_role: role, chapter_id: chapterId, region },
     });
 
     return NextResponse.json({ success: true });

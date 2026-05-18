@@ -4,13 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useCollection, useDocument } from "@/hooks/use-firestore";
 import { useAuth } from "@/hooks/use-auth";
-import {
-  addDocument,
-  deleteDoc,
-  doc,
-  orderBy,
-  where,
-} from "@/lib/supabase/firestore";
+import { orderBy, where } from "@/lib/supabase/firestore";
+import { deleteDoc, doc } from "@/lib/supabase/firestore";
+import { db } from "@/lib/supabase/client";
+import { addDocument } from "@/lib/supabase/firestore";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -111,7 +108,7 @@ export function ChapterAliases({ chapterId }: ChapterAliasesProps) {
   const handleDelete = async (aliasId: string, aliasName: string) => {
     setIsDeleting(true);
     try {
-      await deleteDoc(doc("chapter_aliases", aliasId));
+      await deleteDoc(doc(db, "chapter_aliases", aliasId));
       toast.success(`Alias "${aliasName}" removed`);
       setConfirmDeleteId(null);
     } catch {

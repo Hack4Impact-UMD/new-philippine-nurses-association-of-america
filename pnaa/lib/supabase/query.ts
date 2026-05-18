@@ -172,38 +172,15 @@ PostgrestTransformBuilder<any, any, any, any>).limit(c.count);
   return q as T;
 }
 
-/**
- * (#10) Realtime postgres_changes filters use `column=op.value` and parse on
- * `=` / `.` / `,`. Values containing those characters (or anything outside a
- * conservative alphanumeric+dash+underscore allowlist) would corrupt the
- * filter, so we drop the filter and refetch on every change instead.
- */
-const SAFE_FILTER_VALUE = /^[A-Za-z0-9_\-:@+]+$/;
-
-/** Build a Realtime filter string from a where constraint, if safe. */
+/** Build a Realtime filter string from a where constraint, if possible. */
 export function buildRealtimeFilter(constraints: QueryConstraint[]): string | undefined {
+  // postgres_changes supports only a single eq-style filter, so pick the first
+  // exact-match where() and fall back to client-side filtering for the rest.
   const exact = constraints.find(
     (c): c is WhereConstraint => c.__kind === "where" && c.op === "=="
   );
   if (!exact) return undefined;
-  const value = String(exact.value ?? "");
-  if (!SAFE_FILTER_VALUE.test(value)) return undefined;
-  if (!/^[A-Za-z0-9_]+$/.test(exact.field)) return undefined;
-  return `${exact.field}=eq.${value}`;
-}
-
-/**
- * (#11) PostgREST's default max_rows truncates silently. Surface a warning so
- * pages that need pagination don't ship with hidden cutoffs.
- */
-export const POSTGREST_MAX_ROWS = 1000;
-export function warnIfHitMaxRows(table: string, count: number): void {
-  if (count >= POSTGREST_MAX_ROWS) {
-    console.warn(
-      `[supabase] query on "${table}" returned ${count} rows — at PostgREST max_rows. ` +
-        "Add pagination or a tighter filter; results may be truncated."
-    );
-  }
+  return `${exact.field}=eq.${exact.value}`;
 }
 
 /** Predicate that mirrors a where constraint on a hydrated row, for client-side filtering. */

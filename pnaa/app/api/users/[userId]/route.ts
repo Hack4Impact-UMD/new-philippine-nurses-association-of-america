@@ -45,15 +45,11 @@ export async function PATCH(
       .eq("id", userId);
     if (dbErr) throw dbErr;
 
-    // (#7) Merge into existing app_metadata so unrelated claims survive.
-    const { data: authUser } = await admin.auth.admin.getUserById(userId);
-    const prevMeta = (authUser?.user?.app_metadata ?? {}) as Record<string, unknown>;
     const { error: claimsErr } = await admin.auth.admin.updateUserById(userId, {
       app_metadata: {
-        ...prevMeta,
         user_role: role,
-        chapter_id: chapterId ?? null,
-        region: region ?? null,
+        ...(chapterId ? { chapter_id: chapterId } : {}),
+        ...(region ? { region } : {}),
       },
     });
     if (claimsErr) throw claimsErr;

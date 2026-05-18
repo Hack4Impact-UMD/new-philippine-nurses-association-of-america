@@ -15,18 +15,22 @@ export function getSupabaseBrowser(): SupabaseClient {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
-        // Disable navigator.locks-based serialization. Default uses a
-        // process-wide lock that survives across tabs; if a previous tab
-        // or hung dev server left the lock held, every getSession() and
-        // .from() call blocks indefinitely (auth events still fire because
-        // they don't need the lock). Run our auth ops directly instead.
-        lock: async <T,>(_name: string, _timeout: number, fn: () => Promise<T>) => fn(),
       },
     }
   );
-  // Debug: expose for direct console probing. Remove after auth is fixed.
-  if (typeof window !== "undefined") {
-    (window as unknown as { _sb: SupabaseClient })._sb = _client;
-  }
   return _client;
 }
+
+// Lazy singleton — matches the `auth` / `db` / `storage` export shape that the
+// rest of the codebase imports.
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(_, prop) {
+    return (getSupabaseBrowser() as unknown as Record<string | symbol, unknown>)[prop];
+  },
+});
+
+// Compatibility aliases — callers used to import { auth, db } from
+// the old firebase config. They are the same Supabase client now, but
+// we keep the names so call sites don't need to change.
+export const auth = supabase;
+export const db = supabase;
