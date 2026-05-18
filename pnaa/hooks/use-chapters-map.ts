@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useState } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { hydrateTimestamps } from "@/lib/supabase/timestamp";
 import type { Chapter } from "@/types/chapter";
@@ -31,6 +32,7 @@ let cache: ChaptersCache | null = null;
 let inFlight: Promise<void> | null = null;
 let lastError: Error | null = null;
 const subscribers = new Set<() => void>();
+let realtimeChannel: RealtimeChannel | null = null;
 
 function buildCache(rows: ChapterRow[]): ChaptersCache {
   const byId = new Map<string, ChapterRow>();
@@ -59,6 +61,7 @@ async function loadChaptersOnce(): Promise<void> {
       );
       cache = buildCache(rows);
       lastError = null;
+      ensureRealtime();
     } catch (err) {
       lastError = err as Error;
       cache = EMPTY_CACHE;
@@ -68,6 +71,25 @@ async function loadChaptersOnce(): Promise<void> {
     }
   })();
   return inFlight;
+}
+
+// (#12) Keep the cache fresh: subscribe once and refetch whenever the
+// chapters table changes. Without this, the singleton cache was stuck on
+// the first read for the lifetime of the page.
+function ensureRealtime(): void {
+  if (realtimeChannel || typeof window === "undefined") return;
+  const supabase = getSupabaseBrowser();
+  realtimeChannel = supabase
+    .channel("use-chapters-map:chapters")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "chapters" },
+      () => {
+        cache = null;
+        void loadChaptersOnce();
+      }
+    )
+    .subscribe();
 }
 
 /** Invalidate the cache + refetch. Call after mutations (e.g. creating a chapter). */

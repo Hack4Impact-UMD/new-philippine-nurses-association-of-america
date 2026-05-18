@@ -49,14 +49,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const admin = supabaseAdmin();
+    // app_metadata is fresh on createUser, so set the full claim set here.
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,
       email_confirm: true,
       user_metadata: { displayName },
       app_metadata: {
         user_role: targetRole,
-        ...(chapterId ? { chapter_id: chapterId } : {}),
-        ...(region ? { region } : {}),
+        chapter_id: chapterId ?? null,
+        region: region ?? null,
       },
     });
     if (createErr) throw createErr;

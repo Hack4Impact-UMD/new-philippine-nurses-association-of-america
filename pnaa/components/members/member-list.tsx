@@ -13,7 +13,6 @@ import {
   type DocumentSnapshot,
   type QueryConstraint,
 } from "@/lib/supabase/firestore";
-import { db } from "@/lib/supabase/client";
 import { SearchInput } from "@/components/shared/search-input";
 import {
   AdvancedDataTable,
@@ -77,7 +76,7 @@ export function MemberList() {
     if (startCursor) constraints.push(startAfter(startCursor));
     constraints.push(fsLimit(PAGE_SIZE + 1)); // +1 to detect "more"
 
-    getDocs(query(collection(db, "members"), ...constraints))
+    getDocs(query(collection("members"), ...constraints))
       .then((snap) => {
         if (cancelled) return;
         const docs = snap.docs;

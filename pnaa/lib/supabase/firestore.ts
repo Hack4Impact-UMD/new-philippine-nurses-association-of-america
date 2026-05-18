@@ -3,7 +3,12 @@
 // serverTimestamp, addDocument/updateDocument/archiveDocument helpers.
 
 import { getSupabaseBrowser } from "./client";
-import { applyConstraints, type QueryConstraint } from "./query";
+import {
+  applyConstraints,
+  buildRealtimeFilter,
+  warnIfHitMaxRows,
+  type QueryConstraint,
+} from "./query";
 import {
   hydrateTimestamps,
   serializeTimestamps,
@@ -69,6 +74,7 @@ export async function queryCollection<T>(
   const q = applyConstraints(builder, constraints);
   const { data, error } = await q;
   if (error) throw error;
+  warnIfHitMaxRows(tableFor(collectionName), data?.length ?? 0);
   return (data ?? []).map((row: Record<string, unknown>) => hydrateTimestamps(row)) as T[];
 }
 
@@ -124,12 +130,11 @@ export async function archiveDocument(
 
 /** Returns a tagged ref tuple that getDoc/deleteDoc accept. */
 export function doc(
-  _supabase: unknown,
   collection: string,
   id: string,
   ...rest: string[]
 ): { table: string; id: string; parentPath?: string[] } {
-  // Subcollection style: doc(db, "events", eventId, "attendees", attendeeId)
+  // Subcollection style: doc("events", eventId, "attendees", attendeeId)
   // → table="attendees", id=attendeeId, parentPath=["events", eventId]
   if (rest.length >= 2) {
     return {
@@ -176,9 +181,9 @@ export { Timestamp, serverTimestamp };
 export type { Member, Chapter, AppEvent, FundraisingCampaign, AppUser };
 
 // query() / collection() shims for call sites doing
-// `query(collection(db, "events"), where(...), orderBy(...))`.
+// `query(collection("events"), where(...), orderBy(...))`.
 // They just collect constraints into a tagged tuple that getDocs can replay.
-export function collection(_supabase: unknown, name: string, ...rest: string[]): { table: string; parentPath?: string[] } {
+export function collection(name: string, ...rest: string[]): { table: string; parentPath?: string[] } {
   if (rest.length >= 2) {
     return {
       table: tableFor(rest[1]),
@@ -192,7 +197,7 @@ export function collection(_supabase: unknown, name: string, ...rest: string[]):
  * collectionGroup shim — with the flat attendees table this is just
  * `from("attendees")`. Other group queries collapse the same way.
  */
-export function collectionGroup(_supabase: unknown, name: string): { table: string } {
+export function collectionGroup(name: string): { table: string } {
   return { table: tableFor(name) };
 }
 
@@ -294,13 +299,9 @@ export function onSnapshot(
 
   fetchAndEmit();
 
-  // Pick a Realtime filter if possible.
-  const filterConstraint = constraints.find(
-    (c): c is import("./query").WhereConstraint => c.__kind === "where" && c.op === "=="
-  );
-  const filter = filterConstraint
-    ? `${filterConstraint.field}=eq.${String(filterConstraint.value)}`
-    : undefined;
+  // (#10) Build the Realtime filter through the safe-escape helper so values
+  // containing commas / dots / parens don't corrupt the parser.
+  const filter = buildRealtimeFilter(constraints);
 
   const channel = supabase
     .channel(`onSnapshot:${q.table}:${JSON.stringify(constraints)}`)
@@ -339,6 +340,7 @@ export async function getDocs(q: {
   const built = applyConstraints(builder, q.constraints ?? []);
   const { data, error } = await built;
   if (error) throw error;
+  warnIfHitMaxRows(q.table, data?.length ?? 0);
   const rows = (data ?? []).map((row: Record<string, unknown>) =>
     hydrateTimestamps(row)
   ) as Record<string, unknown>[];
@@ -374,7 +376,7 @@ interface BatchOp {
   merge?: boolean;
 }
 
-export function writeBatch(_supabase: unknown): {
+export function writeBatch(): {
   set: (ref: { table: string; id: string }, data: Record<string, unknown>, options?: { merge?: boolean }) => void;
   update: (ref: { table: string; id: string }, data: Record<string, unknown>) => void;
   delete: (ref: { table: string; id: string }) => void;

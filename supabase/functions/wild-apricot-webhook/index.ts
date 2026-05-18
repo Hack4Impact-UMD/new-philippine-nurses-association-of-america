@@ -47,9 +47,12 @@ function mapContact(contact: Record<string, unknown>, resolver: ChapterResolver)
     chapterName,
     chapterName === "PNA Member-at-Large" ? "" : region,
   );
+  const contactId = String(contact.Id ?? "");
 
+  // (#14) members.id is the WA contact id; attendees.memberId joins against it.
   return {
-    id: memberId,
+    id: contactId,
+    contactId,
     name: `${contact.FirstName ?? ""} ${contact.LastName ?? ""}`.trim(),
     email: String(contact.Email ?? ""),
     membershipLevel,
@@ -64,28 +67,14 @@ function mapContact(contact: Record<string, unknown>, resolver: ChapterResolver)
 }
 
 async function recalculateChapterAggregates(supabase: SupabaseSvc, chapterIds: string[]) {
-  const now = new Date();
-  for (const chapterId of chapterIds) {
-    if (!chapterId) continue;
-    const { data: members } = await supabase
-      .from("members")
-      .select("renewalDueDate")
-      .eq("chapterId", chapterId);
-    let totalMembers = 0;
-    let totalActive = 0;
-    let totalLapsed = 0;
-    for (const m of members ?? []) {
-      const row = m as { renewalDueDate?: string };
-      totalMembers++;
-      const isActive = row.renewalDueDate && new Date(row.renewalDueDate) >= now;
-      if (isActive) totalActive++;
-      else totalLapsed++;
-    }
-    await supabase
-      .from("chapters")
-      .update({ totalMembers, totalActive, totalLapsed })
-      .eq("id", chapterId);
-  }
+  // (#8) One RPC call replaces 2N round-trips. The RPC does a single grouped
+  // count + an UPDATE FROM, and zeroes out chapters that lost all members.
+  const ids = chapterIds.filter((c): c is string => !!c);
+  if (ids.length === 0) return;
+  const { error } = await supabase.rpc("recalculate_chapter_aggregates", {
+    p_chapter_ids: ids,
+  });
+  if (error) throw error;
 }
 
 async function handleContact(
@@ -134,16 +123,17 @@ async function handleEvent(
     return;
   }
 
-  const raw = await fetchWAEvent(accessToken, accountId, eventId);
-  if (!raw) return;
-
-  // Insert-only for new events; never overwrite existing rows.
+  // (#9) Check for existing row BEFORE the WA fetch so we skip the network
+  // call entirely when the app already manages this event.
   const { data: existing } = await supabase
     .from("events")
     .select("id")
     .eq("id", eventId)
     .maybeSingle();
-  if (existing) return; // app already manages this row
+  if (existing) return;
+
+  const raw = await fetchWAEvent(accessToken, accountId, eventId);
+  if (!raw) return;
 
   // WA events report "Tags" with chapter and region — use the resolver if WA gives us one.
   // The /v2/events payload doesn't carry a structured chapter; we leave chapterId null

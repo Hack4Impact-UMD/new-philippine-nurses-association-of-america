@@ -157,6 +157,7 @@ export class ChapterResolver {
 
 export type MemberData = {
   id: string;
+  contactId: string;
   name: string;
   email: string;
   membershipLevel: string;
@@ -201,9 +202,14 @@ export function mapContactToMember(
   }
   const region = extractFieldValue(fieldValues, "PNAA Region");
   const chapterId = resolver.resolve(chapterName, chapterName === "PNA Member-at-Large" ? "" : region);
+  const contactId = String(contact.Id ?? "");
+  if (!contactId) return null;
 
+  // (#14) members.id is always the WA contact id; attendees.memberId joins
+  // against it. The "Member ID" field is preserved as a display column.
   return {
-    id: memberId,
+    id: contactId,
+    contactId,
     name: `${contact.FirstName ?? ""} ${contact.LastName ?? ""}`.trim(),
     email: String(contact.Email ?? ""),
     membershipLevel,

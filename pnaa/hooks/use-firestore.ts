@@ -11,6 +11,7 @@ import {
   applyConstraints,
   buildRealtimeFilter,
   rowMatches,
+  warnIfHitMaxRows,
   type QueryConstraint,
 } from "@/lib/supabase/query";
 import { hydrateTimestamps } from "@/lib/supabase/timestamp";
@@ -137,6 +138,7 @@ export function useCollection<T>(
         setLoading(false);
         return;
       }
+      warnIfHitMaxRows(table, rows?.length ?? 0);
       setData(
         (rows ?? []).map(
           (row: Record<string, unknown>) =>
@@ -225,6 +227,7 @@ export function useCollectionOnce<T>(
         setLoading(false);
         return;
       }
+      warnIfHitMaxRows(table, rows?.length ?? 0);
       setData(
         (rows ?? []).map(
           (row: Record<string, unknown>) =>

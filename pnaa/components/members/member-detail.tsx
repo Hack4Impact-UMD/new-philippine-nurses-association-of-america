@@ -9,7 +9,7 @@ import {
   query,
   where,
 } from "@/lib/supabase/firestore";
-import { db, getSupabaseBrowser } from "@/lib/supabase/client";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { hydrateTimestamps } from "@/lib/supabase/timestamp";
 import { useDocumentOnce } from "@/hooks/use-firestore";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
@@ -65,7 +65,7 @@ export function MemberDetail({ memberId }: { memberId: string }) {
   useEffect(() => {
     setAttendanceLoading(true);
     const q = query(
-      collectionGroup(db, "attendees"),
+      collectionGroup("attendees"),
       where("memberId", "==", memberId),
       where("attended", "==", true)
     );
