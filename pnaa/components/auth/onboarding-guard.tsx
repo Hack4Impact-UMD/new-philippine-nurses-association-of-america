@@ -13,6 +13,12 @@ export function OnboardingGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
+    console.log("[guard]", {
+      isLoading,
+      hasUser: !!user,
+      needsOnboarding: user?.needsOnboarding,
+      uid: user?.uid,
+    });
     if (!isLoading && user?.needsOnboarding) {
       router.replace("/setup");
     }

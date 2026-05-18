@@ -39,38 +39,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowser();
 
     const loadProfile = async (sbUser: SupabaseUser | null) => {
+      console.log("[auth] loadProfile called; sbUser:", sbUser?.id ?? "null");
       if (!sbUser) {
         setUser(null);
         return;
       }
-      const { data } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", sbUser.id)
-        .maybeSingle();
-      if (data) {
-        setUser({
-          ...(hydrateTimestamps(data) as AppUser),
-          uid: sbUser.id,
-        });
-      } else {
+      try {
+        console.log("[auth] firing users query for", sbUser.id);
+        const queryStart = performance.now();
+        const { data, error } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", sbUser.id)
+          .maybeSingle();
+        console.log("[auth] users query returned in", Math.round(performance.now() - queryStart), "ms, error:", error, "data:", data);
+        if (error) {
+          console.error("[auth] loadProfile failed:", error);
+          setUser(null);
+          return;
+        }
+        if (data) {
+          setUser({
+            ...(hydrateTimestamps(data) as AppUser),
+            uid: sbUser.id,
+          });
+        } else {
+          console.warn("[auth] no public.users row for", sbUser.id);
+          setUser(null);
+        }
+      } catch (err) {
+        console.error("[auth] loadProfile threw:", err);
         setUser(null);
       }
     };
 
-    supabase.auth.getSession().then(async ({ data }: { data: { session: { user: SupabaseUser } | null } }) => {
-      const sbUser = data.session?.user ?? null;
-      setAuthUser(sbUser);
-      await loadProfile(sbUser);
-      setIsLoading(false);
-    });
+    // Always release the loading state, even if getSession/loadProfile rejects.
+    // Without try/finally a hung network call would keep authLoading=true forever
+    // and the consumer (e.g. /setup) would show a spinner indefinitely.
+    supabase.auth
+      .getSession()
+      .then(async ({ data }: { data: { session: { user: SupabaseUser } | null } }) => {
+        const sbUser = data.session?.user ?? null;
+        console.log("[auth] getSession resolved; signed in:", !!sbUser);
+        setAuthUser(sbUser);
+        try {
+          await loadProfile(sbUser);
+        } finally {
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error("[auth] getSession rejected:", err);
+        setIsLoading(false);
+      });
 
     const { data: sub } = supabase.auth.onAuthStateChange(
-      async (_event: string, session: { user: SupabaseUser } | null) => {
+      async (event: string, session: { user: SupabaseUser } | null) => {
         const sbUser = session?.user ?? null;
+        console.log("[auth] onAuthStateChange:", event, "signed in:", !!sbUser);
         setAuthUser(sbUser);
-        await loadProfile(sbUser);
-        setIsLoading(false);
+        try {
+          await loadProfile(sbUser);
+        } finally {
+          setIsLoading(false);
+        }
       }
     );
 
