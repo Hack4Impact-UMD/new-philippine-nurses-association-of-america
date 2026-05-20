@@ -44,8 +44,12 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const { data } = await supabase.auth.getUser();
-  const isAuthed = !!data.user;
+  // getSession decodes the cookie locally — no network round trip, so this
+  // can't hang the route transition the way getUser() does after a long tab
+  // suspension. RLS protects actual data access, so the cookie-only check is
+  // fine for the "redirect to signin or not" gate.
+  const { data } = await supabase.auth.getSession();
+  const isAuthed = !!data.session?.user;
 
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
   if (isProtected && !isAuthed) {

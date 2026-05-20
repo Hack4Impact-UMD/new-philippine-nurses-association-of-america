@@ -10,6 +10,8 @@ import {
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { hydrateTimestamps } from "@/lib/supabase/timestamp";
+import { invalidateChaptersMap } from "@/hooks/use-chapters-map";
+import { invalidateSubevents } from "@/hooks/use-subevents";
 import type { AppUser } from "@/types/user";
 
 interface AuthContextType {
@@ -77,6 +79,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       sub.subscription.unsubscribe();
     };
+  }, []);
+
+  // Tab-recovery: after a long suspension, Supabase's auto-refresh timer can
+  // wedge in a never-resolving state and every query hangs forever. When the
+  // tab becomes visible again, force a session refresh + cache invalidation.
+  // If the refresh itself stalls past 5s, reload — same outcome as the user's
+  // manual reload but automatic.
+  useEffect(() => {
+    const HIDDEN_THRESHOLD_MS = 2 * 60 * 1000;
+    const REFRESH_TIMEOUT_MS = 5 * 1000;
+    let hiddenAt: number | null = null;
+
+    const handle = async () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      if (hiddenAt == null) return;
+      const elapsed = Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (elapsed < HIDDEN_THRESHOLD_MS) return;
+
+      const supabase = getSupabaseBrowser();
+      try {
+        await Promise.race([
+          supabase.auth.refreshSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("refresh-timeout")), REFRESH_TIMEOUT_MS)
+          ),
+        ]);
+        invalidateChaptersMap();
+        invalidateSubevents();
+      } catch {
+        // Refresh stalled — the safest path is the user's manual fix.
+        window.location.reload();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handle);
+    return () => document.removeEventListener("visibilitychange", handle);
   }, []);
 
   const signIn = () => {
