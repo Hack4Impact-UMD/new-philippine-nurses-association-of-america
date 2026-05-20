@@ -61,6 +61,10 @@ export interface AppEvent {
   // Subchapter association (optional)
   subchapterId?: string;
 
+  // National conferences only: ordered list of sub-events drawn from the
+  // subevents catalog. Empty / unused on other event types.
+  subeventIds: string[];
+
   // Metadata
   source: "wildapricot" | "app";
   lastUpdatedUser: string;

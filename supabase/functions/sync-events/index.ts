@@ -18,8 +18,14 @@ type EventRow = {
   startDate?: string;
   endDate?: string;
   location?: string;
+  chapterId?: string;
   archived?: boolean;
 };
+
+// WA's /v2/events payload has no clean per-event chapter field, so we pin
+// imports to the National chapter (region "National"). Admins can reassign
+// from the app afterwards.
+const DEFAULT_IMPORT_CHAPTER_ID = "national";
 
 async function fetchAllWAEvents(
   accessToken: string,
@@ -45,14 +51,13 @@ async function fetchAllWAEvents(
 }
 
 function eventToRow(ev: Record<string, unknown>): EventRow {
-  // WA's /v2/events payload doesn't have a clean per-event chapter field, so
-  // chapterId is left null on insert and admins assign it via the app.
   return {
     id: String(ev.Id ?? ""),
     name: String(ev.Name ?? ""),
     startDate: ev.StartDate ? String(ev.StartDate) : undefined,
     endDate: ev.EndDate ? String(ev.EndDate) : undefined,
     location: String(ev.Location ?? ""),
+    chapterId: DEFAULT_IMPORT_CHAPTER_ID,
     archived: false,
   };
 }

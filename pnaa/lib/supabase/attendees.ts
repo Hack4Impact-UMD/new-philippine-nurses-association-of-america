@@ -120,6 +120,119 @@ export async function fetchAttendees(
   );
 }
 
+/**
+ * Paginated full fetch — used by bulk-upload matching, which needs every
+ * attendee on the event regardless of PostgREST's 1000-row cap.
+ */
+export async function fetchAllAttendees(
+  eventId: string
+): Promise<(Attendee & { id: string })[]> {
+  const supabase = getSupabaseBrowser();
+  const PAGE = 1000;
+  const out: (Attendee & { id: string })[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("attendees")
+      .select("*")
+      .eq("eventId", eventId)
+      .order("name")
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as Record<string, unknown>[];
+    for (const r of rows) {
+      out.push(hydrateTimestamps(r) as unknown as Attendee & { id: string });
+    }
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
+// ---------- Sub-event RPC wrappers ----------
+
+export async function setSubeventAttendance(params: {
+  eventId: string;
+  attendeeId: string;
+  subeventId: string;
+  attended: boolean;
+  user: string;
+}): Promise<void> {
+  const { eventId, attendeeId, subeventId, attended, user } = params;
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("set_subevent_attendance", {
+    p_event_id: eventId,
+    p_attendee_id: attendeeId,
+    p_subevent_id: subeventId,
+    p_attended: attended,
+    p_user: user,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function addSubeventToEvent(params: {
+  eventId: string;
+  name: string;
+  user: string;
+}): Promise<string> {
+  const supabase = getSupabaseBrowser();
+  const { data, error } = await supabase.rpc("add_subevent_to_event", {
+    p_event_id: params.eventId,
+    p_subevent_name: params.name,
+    p_user: params.user,
+  });
+  if (error) throw new Error(error.message);
+  return String(data);
+}
+
+export async function removeSubeventFromEvent(params: {
+  eventId: string;
+  subeventId: string;
+  user: string;
+}): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("remove_subevent_from_event", {
+    p_event_id: params.eventId,
+    p_subevent_id: params.subeventId,
+    p_user: params.user,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function reorderEventSubevents(params: {
+  eventId: string;
+  subeventIds: string[];
+  user: string;
+}): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("reorder_event_subevents", {
+    p_event_id: params.eventId,
+    p_subevent_ids: params.subeventIds,
+    p_user: params.user,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export interface BulkSubeventRow {
+  attendeeId: string;
+  subeventId: string;
+  attended: boolean;
+}
+
+export async function bulkSetSubeventAttendance(params: {
+  eventId: string;
+  rows: BulkSubeventRow[];
+  user: string;
+}): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("bulk_set_subevent_attendance", {
+    p_event_id: params.eventId,
+    p_rows: params.rows,
+    p_user: params.user,
+  });
+  if (error) throw new Error(error.message);
+}
+
 export async function fetchEvent<T>(eventId: string): Promise<(T & { id: string }) | null> {
   const supabase = getSupabaseBrowser();
   const { data, error } = await supabase

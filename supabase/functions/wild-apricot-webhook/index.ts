@@ -22,6 +22,10 @@ import {
 
 type SupabaseSvc = ReturnType<typeof getServiceClient>;
 
+// WA events have no per-event chapter field, so imports default to the
+// National chapter (region "National"). Admins can reassign from the app.
+const DEFAULT_IMPORT_CHAPTER_ID = "national";
+
 interface WAWebhookBody {
   MessageType?: string;
   Parameters?: Record<string, string>;
@@ -135,9 +139,8 @@ async function handleEvent(
   const raw = await fetchWAEvent(accessToken, accountId, eventId);
   if (!raw) return;
 
-  // WA events report "Tags" with chapter and region — use the resolver if WA gives us one.
-  // The /v2/events payload doesn't carry a structured chapter; we leave chapterId null
-  // and let admins assign it from the app.
+  // WA events have no structured chapter field, so default to National.
+  // Admins can reassign from the app afterwards.
   await flushPendingChapters(supabase, resolver);
   await supabase.from("events").insert({
     id: eventId,
@@ -145,6 +148,7 @@ async function handleEvent(
     startDate: raw.StartDate ? String(raw.StartDate) : null,
     endDate: raw.EndDate ? String(raw.EndDate) : null,
     location: String(raw.Location ?? ""),
+    chapterId: DEFAULT_IMPORT_CHAPTER_ID,
     archived: false,
   });
 }

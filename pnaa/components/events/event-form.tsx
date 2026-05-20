@@ -31,6 +31,8 @@ import { propagateConferenceDefaultHours } from "@/lib/supabase/attendees";
 import { useAuth } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Timestamp } from "@/lib/supabase/firestore";
+import { isNationalConference } from "@/lib/national-conference";
+import { SubeventPicker } from "@/components/events/subevent-picker";
 import {
   EVENT_TYPE_LABELS,
   EVENT_SUBTYPE_LABELS,
@@ -62,6 +64,7 @@ const eventSchema = z.object({
   participantsServed: z.number().min(0),
   volunteerHours: z.number().min(0),
   archived: z.boolean(),
+  subeventIds: z.array(z.string()),
 });
 
 type EventFormValues = z.infer<typeof eventSchema>;
@@ -99,18 +102,27 @@ export function EventForm({ event, mode }: EventFormProps) {
       participantsServed: event?.participantsServed || 0,
       volunteerHours: event?.volunteerHours || 0,
       archived: event?.archived || false,
+      subeventIds: event?.subeventIds ?? [],
     },
   });
 
   // Watch type to filter subtype options and label the hours field appropriately.
   const watchedType = form.watch("eventType") as EventType;
+  const watchedChapter = form.watch("chapterId");
+  const watchedSubeventIds = form.watch("subeventIds");
   const subtypeOptions = SUBTYPES_BY_TYPE[watchedType] ?? [];
-  const hoursLabel =
-    watchedType === "conference"
+  const isNational = isNationalConference({
+    eventType: watchedType,
+    chapterId: watchedChapter,
+  } as AppEvent);
+  const hoursLabel = isNational
+    ? "Hours per sub-event"
+    : watchedType === "conference"
       ? "Hours per attendee"
       : "Default hours (autofilled per attendee)";
-  const hoursDescription =
-    watchedType === "conference"
+  const hoursDescription = isNational
+    ? "Each sub-event attended earns this many hours. Total = hours × sub-events attended."
+    : watchedType === "conference"
       ? "Every attendee marked attended earns this many hours."
       : "Prefilled for each attendee — admins can override per person.";
 
@@ -153,7 +165,11 @@ export function EventForm({ event, mode }: EventFormProps) {
         toast.success("Event created successfully");
         router.push(`/events/${docId}`);
       } else if (event) {
-        await updateDocument("events", event.id, eventData);
+        // In edit mode subeventIds is owned by SubeventPicker (already committed
+        // via RPC). Omit it from the update so we don't clobber attendee cleanup.
+        const { subeventIds: _ignoredSubeventIds, ...editData } = eventData;
+        void _ignoredSubeventIds;
+        await updateDocument("events", event.id, editData);
 
         // For conferences, propagate any defaultHours (or type) change to every
         // attended attendee — keeps the "live" rule the user asked for.
@@ -448,6 +464,28 @@ export function EventForm({ event, mode }: EventFormProps) {
             </div>
           </CardContent>
         </Card>
+
+        {isNational && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Sub-events</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                National conferences track attendance per sub-event. Pick from
+                the shared catalog or type a new name to add it.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <SubeventPicker
+                eventId={mode === "edit" ? event?.id : undefined}
+                value={watchedSubeventIds}
+                onChange={(next) =>
+                  form.setValue("subeventIds", next, { shouldDirty: true })
+                }
+                user={user?.email || ""}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardContent className="pt-6">

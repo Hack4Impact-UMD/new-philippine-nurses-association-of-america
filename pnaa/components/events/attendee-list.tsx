@@ -19,6 +19,7 @@ import {
 } from "@/components/shared/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,14 +32,18 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchInput } from "@/components/shared/search-input";
-import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight, Upload } from "lucide-react";
+import { BulkAttendanceUpload } from "@/components/events/bulk-attendance-upload";
 import { toast } from "sonner";
 import { useAuth, useIsAdmin, useIsNationalAdmin } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
+import { useSubevents } from "@/hooks/use-subevents";
 import { useDebounce } from "@/hooks/use-debounce";
+import { isNationalConference } from "@/lib/national-conference";
 import {
   setAttendance,
   setAttendeeHours,
+  setSubeventAttendance,
   addManualAttendee,
   removeManualAttendee,
 } from "@/lib/supabase/attendees";
@@ -59,7 +64,14 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
   const { user } = useAuth();
   const isAdmin = useIsAdmin();
   const isNationalAdmin = useIsNationalAdmin();
+  const { nameFor: subeventNameFor } = useSubevents();
+  const isNational = isNationalConference(event);
+  const eventSubeventIds = useMemo(
+    () => event.subeventIds ?? [],
+    [event.subeventIds]
+  );
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
 
   // ─── WA registrations: paginated server-side ───────────────────────────
   const [waRows, setWaRows] = useState<AttendeeRow[]>([]);
@@ -82,7 +94,10 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     setWaLoading(true);
 
     const startCursor = waCursors[waPage] ?? null;
-    const constraints: QueryConstraint[] = [where("source", "==", "wildapricot")];
+    const constraints: QueryConstraint[] = [
+      where("eventId", "==", event.id),
+      where("source", "==", "wildapricot"),
+    ];
     if (debouncedWaSearch.trim().length > 0) {
       constraints.push(where("name", "ilike", `%${escapeLike(debouncedWaSearch.trim())}%`));
     }
@@ -134,6 +149,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       const snap = await getDocs(
         query(
           collection("events", event.id, "attendees"),
+          where("eventId", "==", event.id),
           where("source", "==", "app"),
           orderBy("name")
         )
@@ -186,6 +202,46 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       toast.error("Failed to update attendance");
       // Roll back optimistic update.
       const rollback = { attended: row.attended, hours: row.hours };
+      if (row.source === "app") patchManualRow(row.id, rollback);
+      else patchWaRow(row.id, rollback);
+    }
+  };
+
+  const handleToggleSubevent = async (
+    row: AttendeeRow,
+    subeventId: string,
+    attended: boolean
+  ) => {
+    const oldArr = row.attendedSubeventIds ?? [];
+    const nextArr = attended
+      ? oldArr.includes(subeventId)
+        ? oldArr
+        : [...oldArr, subeventId]
+      : oldArr.filter((id) => id !== subeventId);
+    const nextHours = nextArr.length * (event.defaultHours ?? 0);
+    const patch = {
+      attendedSubeventIds: nextArr,
+      hours: nextHours,
+      attended: nextArr.length > 0,
+    };
+    if (row.source === "app") patchManualRow(row.id, patch);
+    else patchWaRow(row.id, patch);
+    try {
+      await setSubeventAttendance({
+        eventId: event.id,
+        attendeeId: row.id,
+        subeventId,
+        attended,
+        user: user?.email || "",
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update sub-event attendance");
+      const rollback = {
+        attendedSubeventIds: oldArr,
+        hours: row.hours,
+        attended: row.attended,
+      };
       if (row.source === "app") patchManualRow(row.id, rollback);
       else patchWaRow(row.id, rollback);
     }
@@ -302,6 +358,69 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
+  const subeventColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
+    () =>
+      eventSubeventIds.map((subeventId) => ({
+        id: `subevent:${subeventId}`,
+        header: subeventNameFor(subeventId, "Sub-event"),
+        size: 110,
+        enableSorting: false,
+        accessorFn: (row: AttendeeRow) =>
+          (row.attendedSubeventIds ?? []).includes(subeventId) ? 1 : 0,
+        cell: ({ row }: { row: { original: AttendeeRow } }) => {
+          const checked = (row.original.attendedSubeventIds ?? []).includes(
+            subeventId
+          );
+          return isAdmin ? (
+            <Checkbox
+              checked={checked}
+              onCheckedChange={(v) =>
+                handleToggleSubevent(row.original, subeventId, Boolean(v))
+              }
+              aria-label={`Toggle ${subeventNameFor(subeventId)}`}
+            />
+          ) : checked ? (
+            <Badge
+              variant="outline"
+              className="text-xs text-green-700 border-green-200 bg-green-50 dark:bg-green-950/30"
+            >
+              Yes
+            </Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          );
+        },
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [eventSubeventIds, isAdmin, subeventNameFor, event.defaultHours]
+  );
+
+  const totalHoursColumn: ColumnDef<AttendeeRow, unknown> = useMemo(
+    () => ({
+      id: "totalHours",
+      header: "Total Hours",
+      size: 110,
+      enableSorting: true,
+      accessorFn: (row) =>
+        (row.attendedSubeventIds ?? []).length * (event.defaultHours ?? 0),
+      cell: ({ row }) => {
+        const count = (row.original.attendedSubeventIds ?? []).length;
+        const total = count * (event.defaultHours ?? 0);
+        return count === 0 ? (
+          <span className="text-sm text-muted-foreground">—</span>
+        ) : (
+          <span className="tabular-nums text-sm">
+            {total}
+            <span className="ml-1 text-xs text-muted-foreground">
+              ({count}×{event.defaultHours ?? 0})
+            </span>
+          </span>
+        );
+      },
+    }),
+    [event.defaultHours]
+  );
+
   const waColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
     () => [
       {
@@ -381,10 +500,11 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
             </Badge>
           ),
       },
-      attendanceColumn,
-      hoursColumn,
+      ...(isNational
+        ? [...subeventColumns, totalHoursColumn]
+        : [attendanceColumn, hoursColumn]),
     ],
-    [isNationalAdmin, attendanceColumn, hoursColumn]
+    [isNationalAdmin, isNational, subeventColumns, totalHoursColumn, attendanceColumn, hoursColumn]
   );
 
   const manualColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
@@ -401,8 +521,9 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           </span>
         ),
       },
-      attendanceColumn,
-      hoursColumn,
+      ...(isNational
+        ? [...subeventColumns, totalHoursColumn]
+        : [attendanceColumn, hoursColumn]),
       ...(isAdmin
         ? [
             {
@@ -428,7 +549,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           ]
         : []),
     ],
-    [isAdmin, attendanceColumn, hoursColumn]
+    [isAdmin, isNational, subeventColumns, totalHoursColumn, attendanceColumn, hoursColumn]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
@@ -444,8 +565,31 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     );
   };
 
+  // Force the manual list to refetch after a bulk upload (new attendees may
+  // have been added during conflict resolution).
+  const refetchAfterBulk = () => {
+    loadManual();
+    // The WA table refetches when its effect deps change; bump search to force.
+    setWaPage((p) => p);
+  };
+
   return (
     <div className="space-y-6">
+      {isNational && isAdmin && (
+        <section className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold">Bulk Sub-Event Attendance</p>
+            <p className="text-xs text-muted-foreground">
+              Upload a CSV (Name, Sub-Event, Attended) to mark many people at once.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setBulkUploadOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
+            Bulk Upload Attendance
+          </Button>
+        </section>
+      )}
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h3 className="text-sm font-semibold">
@@ -527,6 +671,15 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           event={event}
           existingMemberIds={existingMemberIds}
           onAdded={onManualAdded}
+        />
+      )}
+
+      {isNational && isAdmin && (
+        <BulkAttendanceUpload
+          open={bulkUploadOpen}
+          onOpenChange={setBulkUploadOpen}
+          event={event}
+          onApplied={refetchAfterBulk}
         />
       )}
     </div>
@@ -697,6 +850,7 @@ function AddManualAttendeeDialogBody({
         name: selected.name,
         attended: true,
         hours: effectiveHours,
+        attendedSubeventIds: [],
         source: "app",
         memberId: selected.id,
         registrationTypeId: "",
