@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SVGProps } from "react";
 import {
   Bar,
   BarChart,
@@ -13,6 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { makeStackShape } from "@/components/shared/chart-shapes";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,86 +37,30 @@ interface ChapterInsightsProps {
   loading?: boolean;
 }
 
-// SVG path for a rectangle with per-corner rounding. Recharts' built-in `radius`
-// applies to every cell in a series, which breaks stacked bars when one segment
-// is zero (the visible cell ends up flat where it should be capped). We render
-// per-cell paths so the outer-edge rounding tracks the row's actual data.
-type Corners = [number, number, number, number]; // tl, tr, br, bl
-
-function RoundedRect({
-  x,
-  y,
-  width,
-  height,
-  fill,
-  radius,
-  ...rest
-}: Omit<SVGProps<SVGPathElement>, "radius"> & {
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  fill?: string;
-  radius: Corners;
-}) {
-  const w = Number(width ?? 0);
-  const h = Number(height ?? 0);
-  if (w <= 0 || h <= 0) return null;
-  const ox = Number(x ?? 0);
-  const oy = Number(y ?? 0);
-  const cap = Math.min(w, h) / 2;
-  const [tl, tr, br, bl] = radius.map((r) => Math.max(0, Math.min(r, cap))) as Corners;
-  const d = [
-    `M ${ox + tl} ${oy}`,
-    `H ${ox + w - tr}`,
-    tr > 0 ? `Q ${ox + w} ${oy} ${ox + w} ${oy + tr}` : "",
-    `V ${oy + h - br}`,
-    br > 0 ? `Q ${ox + w} ${oy + h} ${ox + w - br} ${oy + h}` : "",
-    `H ${ox + bl}`,
-    bl > 0 ? `Q ${ox} ${oy + h} ${ox} ${oy + h - bl}` : "",
-    `V ${oy + tl}`,
-    tl > 0 ? `Q ${ox} ${oy} ${ox + tl} ${oy}` : "",
-    "Z",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return <path {...rest} d={d} fill={fill} />;
-}
-
-// Vertical stack (Renewal Pipeline): active sits at the bottom, lapsed on top.
-// Round the top of whichever segment ends the stack for this column.
-function VerticalStackedBar(stackKey: "active" | "lapsed") {
-  return function Shape(props: unknown) {
-    const p = props as { payload?: { active?: number; lapsed?: number } };
-    const active = p.payload?.active ?? 0;
-    const lapsed = p.payload?.lapsed ?? 0;
-    let radius: Corners = [0, 0, 0, 0];
-    if (stackKey === "lapsed") {
-      radius = lapsed > 0 ? [4, 4, 0, 0] : [0, 0, 0, 0];
-    } else {
-      radius = active > 0 && lapsed === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0];
-    }
-    return <RoundedRect {...(props as object)} radius={radius} />;
-  };
-}
-
-// Horizontal stack (Membership Levels): active on the left, lapsed on the right.
-// Each segment rounds its outer side; when the other segment is zero, the
-// visible bar rounds all four corners.
-function HorizontalStackedBar(stackKey: "active" | "lapsed") {
-  return function Shape(props: unknown) {
-    const p = props as { payload?: { active?: number; lapsed?: number } };
-    const active = p.payload?.active ?? 0;
-    const lapsed = p.payload?.lapsed ?? 0;
-    let radius: Corners = [0, 0, 0, 0];
-    if (stackKey === "active") {
-      radius = lapsed === 0 ? [4, 4, 4, 4] : [4, 0, 0, 4];
-    } else {
-      radius = active === 0 ? [4, 4, 4, 4] : [0, 4, 4, 0];
-    }
-    return <RoundedRect {...(props as object)} radius={radius} />;
-  };
-}
+const verticalActiveShape = makeStackShape({
+  orientation: "vertical",
+  position: "first",
+  myKey: "active",
+  otherKey: "lapsed",
+});
+const verticalLapsedShape = makeStackShape({
+  orientation: "vertical",
+  position: "last",
+  myKey: "lapsed",
+  otherKey: "active",
+});
+const horizontalActiveShape = makeStackShape({
+  orientation: "horizontal",
+  position: "first",
+  myKey: "active",
+  otherKey: "lapsed",
+});
+const horizontalLapsedShape = makeStackShape({
+  orientation: "horizontal",
+  position: "last",
+  myKey: "lapsed",
+  otherKey: "active",
+});
 
 // Pie palette: leans on the 5 PNAA chart tokens, with three tasteful extensions
 // for chapters whose education mix has many distinct buckets.
@@ -260,13 +204,13 @@ function RenewalPipeline({
             dataKey="active"
             stackId="a"
             fill="var(--color-active)"
-            shape={VerticalStackedBar("active")}
+            shape={verticalActiveShape}
           />
           <Bar
             dataKey="lapsed"
             stackId="a"
             fill="var(--color-lapsed)"
-            shape={VerticalStackedBar("lapsed")}
+            shape={verticalLapsedShape}
           />
         </BarChart>
       </ChartContainer>
@@ -336,13 +280,13 @@ function MembershipLevels({
           dataKey="active"
           stackId="x"
           fill="var(--color-active)"
-          shape={HorizontalStackedBar("active")}
+          shape={horizontalActiveShape}
         />
         <Bar
           dataKey="lapsed"
           stackId="x"
           fill="var(--color-lapsed)"
-          shape={HorizontalStackedBar("lapsed")}
+          shape={horizontalLapsedShape}
         />
       </BarChart>
     </ChartContainer>
