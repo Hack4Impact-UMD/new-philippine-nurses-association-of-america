@@ -26,6 +26,7 @@ import { Users, Building2, GitMerge, Settings2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { parseISO, subYears, isAfter } from "date-fns";
 import { SubchapterList } from "@/components/subchapters/subchapter-list";
+import { ChapterInsights } from "@/components/chapters/chapter-insights";
 import type { Chapter } from "@/types/chapter";
 import type { ChapterAlias } from "@/types/chapter-alias";
 import type { Member } from "@/types/member";
@@ -288,6 +289,13 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Insights */}
+      <ChapterInsights
+        members={members as MemberRow[]}
+        events={events as (AppEvent & { id: string })[]}
+        loading={membersLoading || eventsLoading}
+      />
 
       {/* Tabs */}
       <Tabs defaultValue="members">
