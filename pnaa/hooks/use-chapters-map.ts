@@ -14,12 +14,18 @@ interface ChaptersCache {
   byId: Map<string, ChapterRow>;
   byName: Map<string, ChapterRow>;
   all: ChapterRow[];
+  // Chapters whose name is NOT registered as an alias of another chapter.
+  // This is what every chapter PICKER should use — selecting an aliased row
+  // creates dead data, since members/events under that chapter roll up to the
+  // canonical chapter in chapter-list.tsx.
+  canonical: ChapterRow[];
 }
 
 const EMPTY_CACHE: ChaptersCache = {
   byId: new Map(),
   byName: new Map(),
   all: [],
+  canonical: [],
 };
 
 // ---------- Process-wide singleton ----------
@@ -34,14 +40,20 @@ let lastError: Error | null = null;
 const subscribers = new Set<() => void>();
 let realtimeChannel: RealtimeChannel | null = null;
 
-function buildCache(rows: ChapterRow[]): ChaptersCache {
+function buildCache(rows: ChapterRow[], aliasNames: Set<string>): ChaptersCache {
   const byId = new Map<string, ChapterRow>();
   const byName = new Map<string, ChapterRow>();
+  const canonical: ChapterRow[] = [];
   for (const c of rows) {
     byId.set(c.id, c);
     if (c.name) byName.set(c.name.toLowerCase(), c);
+    // A chapter row is "canonical" iff its display name isn't recorded as an
+    // alias of some other canonical chapter. Aliased rows still exist in the
+    // table (sync may have created them before they were merged), but they
+    // shouldn't be offered in chapter pickers.
+    if (!aliasNames.has(c.name)) canonical.push(c);
   }
-  return { byId, byName, all: rows };
+  return { byId, byName, all: rows, canonical };
 }
 
 function notify(): void {
@@ -53,13 +65,22 @@ async function loadChaptersOnce(): Promise<void> {
   inFlight = (async () => {
     try {
       const supabase = getSupabaseBrowser();
-      const { data, error } = await supabase.from("chapters").select("*");
-      if (error) throw error;
-      const rows = (data ?? []).map(
+      const [chaptersRes, aliasesRes] = await Promise.all([
+        supabase.from("chapters").select("*"),
+        supabase.from("chapter_aliases").select("aliasName"),
+      ]);
+      if (chaptersRes.error) throw chaptersRes.error;
+      if (aliasesRes.error) throw aliasesRes.error;
+      const rows = (chaptersRes.data ?? []).map(
         (row: Record<string, unknown>) =>
           hydrateTimestamps(row) as unknown as ChapterRow
       );
-      cache = buildCache(rows);
+      const aliasNames = new Set(
+        (aliasesRes.data ?? []).map(
+          (a: Record<string, unknown>) => (a.aliasName as string) ?? ""
+        )
+      );
+      cache = buildCache(rows, aliasNames);
       lastError = null;
       ensureRealtime();
     } catch (err) {
@@ -79,15 +100,21 @@ async function loadChaptersOnce(): Promise<void> {
 function ensureRealtime(): void {
   if (realtimeChannel || typeof window === "undefined") return;
   const supabase = getSupabaseBrowser();
+  const refresh = () => {
+    cache = null;
+    void loadChaptersOnce();
+  };
   realtimeChannel = supabase
     .channel("use-chapters-map:chapters")
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "chapters" },
-      () => {
-        cache = null;
-        void loadChaptersOnce();
-      }
+      refresh
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "chapter_aliases" },
+      refresh
     )
     .subscribe();
 }
@@ -140,6 +167,7 @@ export function useChaptersMap() {
     byId: data.byId,
     byName: data.byName,
     all: data.all,
+    canonical: data.canonical,
     loading: !cache,
     error,
     nameFor,

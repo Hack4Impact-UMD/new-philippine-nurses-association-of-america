@@ -29,6 +29,7 @@ import {
 import { addDocument, updateDocument } from "@/lib/supabase/firestore";
 import { useAuth } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
+import { stripChapterPrefix } from "@/lib/utils";
 import { Timestamp } from "@/lib/supabase/firestore";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
@@ -52,7 +53,7 @@ export function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
-  const { all: chapters } = useChaptersMap();
+  const { canonical: chapters } = useChaptersMap();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const subchapterId = searchParams.get("subchapterId") || undefined;
@@ -140,7 +141,7 @@ export function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           .sort((a, b) => a.name.localeCompare(b.name))
                           .map((c) => (
                             <SelectItem key={c.id} value={c.id}>
-                              {c.name}
+                              {stripChapterPrefix(c.name)}
                             </SelectItem>
                           ))}
                       </SelectContent>

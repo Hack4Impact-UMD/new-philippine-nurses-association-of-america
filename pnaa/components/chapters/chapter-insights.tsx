@@ -113,9 +113,12 @@ export function ChapterInsights({
 }
 
 // ─── Renewal Pipeline ──────────────────────────────────────────────────────
+// Dual-tone bar charts use PNAA deep royal (--chart-1) + a brighter blue
+// (#3b82f6, matching the chapters-page activity chart) instead of gold, per
+// design preference. Tokens go through ChartContainer's --color-* aliasing.
 const renewalConfig = {
   active: { label: "Active", color: "var(--chart-1)" },
-  lapsed: { label: "Lapsed", color: "var(--chart-2)" },
+  lapsed: { label: "Lapsed", color: "#3b82f6" },
 } satisfies ChartConfig;
 
 type RenewalRange = 6 | 12 | 24;
@@ -221,7 +224,7 @@ function RenewalPipeline({
 // ─── Membership Levels ─────────────────────────────────────────────────────
 const levelsConfig = {
   active: { label: "Active", color: "var(--chart-1)" },
-  lapsed: { label: "Lapsed", color: "var(--chart-2)" },
+  lapsed: { label: "Lapsed", color: "#3b82f6" },
 } satisfies ChartConfig;
 
 function MembershipLevels({
@@ -411,7 +414,7 @@ function EducationMix({
 // ─── Event Impact ──────────────────────────────────────────────────────────
 const eventsConfig = {
   attendees: { label: "Attendees", color: "var(--chart-1)" },
-  contactHours: { label: "Contact Hours", color: "var(--chart-2)" },
+  contactHours: { label: "Contact Hours", color: "#3b82f6" },
   volunteerHours: { label: "Volunteer Hours", color: "var(--chart-5)" },
 } satisfies ChartConfig;
 

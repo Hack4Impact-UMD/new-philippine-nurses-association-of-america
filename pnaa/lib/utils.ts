@@ -41,3 +41,12 @@ export function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 }
+
+// Most chapter names already start with "PNA " or "PNAA " — redundant when
+// the dropdown's surrounding label already says "Chapter". Strip the prefix
+// for display only; never use the stripped form as data.
+const CHAPTER_PREFIX_RE = /^PNAA?\s+/i;
+export function stripChapterPrefix(name: string): string {
+  if (!name) return name;
+  return name.replace(CHAPTER_PREFIX_RE, "");
+}

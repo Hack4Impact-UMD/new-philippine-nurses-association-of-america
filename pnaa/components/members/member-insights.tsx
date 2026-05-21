@@ -135,9 +135,11 @@ export function MemberInsights() {
 }
 
 // ─── Region Mix ────────────────────────────────────────────────────────────
+// Dual-tone matches the chapters-page activity chart blue (#3b82f6) instead
+// of Philippine Gold for the secondary segment.
 const statusConfig = {
   active: { label: "Active", color: "var(--chart-1)" },
-  lapsed: { label: "Lapsed", color: "var(--chart-2)" },
+  lapsed: { label: "Lapsed", color: "#3b82f6" },
 } satisfies ChartConfig;
 
 const horizontalActiveShape = makeStackShape({

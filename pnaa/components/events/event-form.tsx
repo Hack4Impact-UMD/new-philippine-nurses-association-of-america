@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { addDocument, updateDocument } from "@/lib/supabase/firestore";
 import { propagateConferenceDefaultHours } from "@/lib/supabase/attendees";
+import { stripChapterPrefix } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Timestamp } from "@/lib/supabase/firestore";
@@ -78,7 +79,7 @@ export function EventForm({ event, mode }: EventFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
-  const { all: chapters } = useChaptersMap();
+  const { canonical: chapters } = useChaptersMap();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const subchapterId = searchParams.get("subchapterId") || undefined;
@@ -368,7 +369,7 @@ export function EventForm({ event, mode }: EventFormProps) {
                           .sort((a, b) => a.name.localeCompare(b.name))
                           .map((c) => (
                             <SelectItem key={c.id} value={c.id}>
-                              {c.name}
+                              {stripChapterPrefix(c.name)}
                               {c.region ? ` · ${c.region}` : ""}
                             </SelectItem>
                           ))}

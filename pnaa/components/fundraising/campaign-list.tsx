@@ -20,7 +20,7 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import type { FundraisingCampaign } from "@/types/fundraising";
-import { FundraisingChart } from "./fundraising-chart";
+import { FundraisingInsights } from "./fundraising-insights";
 
 type CampaignRow = FundraisingCampaign & { id: string };
 
@@ -175,7 +175,7 @@ export function CampaignList() {
         </div>
       </div>
 
-      <FundraisingChart campaigns={data} loading={loading} />
+      <FundraisingInsights campaigns={data} loading={loading} />
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
