@@ -8,7 +8,7 @@ import {
   useCollectionOnce,
 } from "@/hooks/use-firestore";
 import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy } from "@/lib/supabase/firestore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,6 +26,7 @@ import { Users, Building2, GitMerge, Settings2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { parseISO, subYears, isAfter } from "date-fns";
 import { SubchapterList } from "@/components/subchapters/subchapter-list";
+import { ChapterInsights } from "@/components/chapters/chapter-insights";
 import type { Chapter } from "@/types/chapter";
 import type { ChapterAlias } from "@/types/chapter-alias";
 import type { Member } from "@/types/member";
@@ -115,7 +116,8 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
     chapterId
   );
 
-  // Load aliases for this chapter
+  // Aliases now collapse to the same canonical chapterId during sync, so
+  // they're surfaced for display / management only, not used as filter keys.
   const aliasConstraints = useMemo(
     () => [where("chapterId", "==", chapterId)],
     [chapterId]
@@ -124,69 +126,36 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
     "chapter_aliases",
     aliasConstraints
   );
-
-  // All chapter names to query (main + aliases)
-  const allChapterNames = useMemo(() => {
-    if (!chapter?.name) return [];
-    return [chapter.name, ...(aliases as AliasRow[]).map((a) => a.aliasName)];
-  }, [chapter?.name, aliases]);
-
   const hasAliases = (aliases as AliasRow[]).length > 0;
 
-  // Member constraints: use 'in' when aliases exist
-  const memberConstraints = useMemo(() => {
-    if (!allChapterNames.length) return [];
-    if (allChapterNames.length === 1) {
-      return [
-        where("chapterName", "==", allChapterNames[0]),
-        orderBy("name", "asc"),
-      ];
-    }
-    return [
-      where("chapterName", "in", allChapterNames),
-      orderBy("name", "asc"),
-    ];
-  }, [allChapterNames]);
+  const memberConstraints = useMemo(
+    () => [where("chapterId", "==", chapterId), orderBy("name", "asc")],
+    [chapterId]
+  );
 
-  // Event constraints
-  const eventConstraints = useMemo(() => {
-    if (!allChapterNames.length) return [];
-    if (allChapterNames.length === 1) {
-      return [
-        where("chapter", "==", allChapterNames[0]),
-        where("archived", "==", false),
-        orderBy("startDate", "desc"),
-      ];
-    }
-    return [
-      where("chapter", "in", allChapterNames),
+  const eventConstraints = useMemo(
+    () => [
+      where("chapterId", "==", chapterId),
       where("archived", "==", false),
       orderBy("startDate", "desc"),
-    ];
-  }, [allChapterNames]);
+    ],
+    [chapterId]
+  );
 
-  // Fundraising constraints
-  const fundraisingConstraints = useMemo(() => {
-    if (!allChapterNames.length) return [];
-    if (allChapterNames.length === 1) {
-      return [
-        where("chapterName", "==", allChapterNames[0]),
-        where("archived", "==", false),
-        orderBy("date", "desc"),
-      ];
-    }
-    return [
-      where("chapterName", "in", allChapterNames),
+  const fundraisingConstraints = useMemo(
+    () => [
+      where("chapterId", "==", chapterId),
       where("archived", "==", false),
       orderBy("date", "desc"),
-    ];
-  }, [allChapterNames]);
+    ],
+    [chapterId]
+  );
 
   const [showAllMembers, setShowAllMembers] = useState(false);
 
   const { data: members, loading: membersLoading } = useCollectionOnce<Member>(
     "members",
-    allChapterNames.length > 0 ? memberConstraints : []
+    chapterId ? memberConstraints : []
   );
 
   const filteredMembers = useMemo((): MemberRow[] => {
@@ -212,13 +181,13 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
 
   const { data: events, loading: eventsLoading } = useCollection<AppEvent>(
     "events",
-    allChapterNames.length > 0 ? eventConstraints : []
+    chapterId ? eventConstraints : []
   );
 
   const { data: campaigns, loading: campaignsLoading } =
     useCollection<FundraisingCampaign>(
       "fundraising",
-      allChapterNames.length > 0 ? fundraisingConstraints : []
+      chapterId ? fundraisingConstraints : []
     );
 
   if (chapterLoading) {
@@ -269,8 +238,8 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
                 {(aliases as AliasRow[]).map((alias) => (
                   <Badge
                     key={alias.id}
-                    variant="secondary"
-                    className="text-xs font-normal gap-1"
+                    variant="outline"
+                    className="text-xs font-normal gap-1 text-muted-foreground"
                   >
                     <GitMerge className="h-2.5 w-2.5" />
                     {alias.aliasName}
@@ -320,6 +289,13 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Insights */}
+      <ChapterInsights
+        members={members as MemberRow[]}
+        events={events as (AppEvent & { id: string })[]}
+        loading={membersLoading || eventsLoading}
+      />
 
       {/* Tabs */}
       <Tabs defaultValue="members">

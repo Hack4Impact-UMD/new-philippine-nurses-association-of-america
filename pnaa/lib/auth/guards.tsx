@@ -29,7 +29,6 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (!isAuthenticated) return null;
-
   return <>{children}</>;
 }
 
@@ -51,6 +50,5 @@ export function RequireRole({
 
   if (isLoading) return null;
   if (!user || !roles.includes(user.role)) return null;
-
   return <>{children}</>;
 }

@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Pencil, DollarSign, Calendar, Building2 } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
 export function CampaignDetail({ campaignId }: { campaignId: string }) {
@@ -17,6 +18,7 @@ export function CampaignDetail({ campaignId }: { campaignId: string }) {
     campaignId
   );
   const isAdmin = useIsAdmin();
+  const { nameFor } = useChaptersMap();
 
   if (loading) {
     return (
@@ -57,7 +59,7 @@ export function CampaignDetail({ campaignId }: { campaignId: string }) {
             </span>
             <span className="flex items-center gap-1">
               <Building2 className="h-4 w-4" />
-              {campaign.chapterName}
+              {nameFor(campaign.chapterId)}
             </span>
           </div>
         </div>

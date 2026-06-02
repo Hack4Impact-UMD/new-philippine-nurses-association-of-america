@@ -5,21 +5,14 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Calendar, MapPin, Users } from "lucide-react";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatDate } from "@/lib/utils";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { AppEvent } from "@/types/event";
 
 export function EventCard({ event }: { event: AppEvent & { id: string } }) {
+  const { nameFor } = useChaptersMap();
   return (
     <Link href={`/events/${event.id}`}>
       <Card className="transition-all hover:shadow-md hover:border-primary/20">
-        {event.eventPoster?.downloadURL && (
-          <div className="aspect-video w-full overflow-hidden rounded-t-lg">
-            <img
-              src={event.eventPoster.downloadURL}
-              alt={event.name}
-              className="h-full w-full object-cover"
-            />
-          </div>
-        )}
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-semibold text-sm line-clamp-2">
@@ -43,7 +36,7 @@ export function EventCard({ event }: { event: AppEvent & { id: string } }) {
           )}
           <div className="flex items-center justify-between pt-1">
             <span className="text-xs text-muted-foreground">
-              {event.chapter}
+              {nameFor(event.chapterId)}
             </span>
             {event.attendees > 0 && (
               <div className="flex items-center gap-1 text-xs text-muted-foreground">

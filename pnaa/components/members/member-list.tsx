@@ -12,8 +12,7 @@ import {
   where,
   type DocumentSnapshot,
   type QueryConstraint,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+} from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import {
   AdvancedDataTable,
@@ -24,19 +23,22 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Users, ChevronLeft, ChevronRight } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { formatDate } from "@/lib/utils";
 import type { Member } from "@/types/member";
 
 type MemberRow = Member & { id: string };
 
 const PAGE_SIZE = 50;
-const MIN_SEARCH = 2;
 
-const titleCase = (s: string) =>
-  s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+/** Escape LIKE/ILIKE wildcards in user input so a literal "%" doesn't match everything. */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
 
 export function MemberList() {
   const router = useRouter();
+  const { nameFor } = useChaptersMap();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [activeOnly, setActiveOnly] = useState(true);
@@ -60,21 +62,21 @@ export function MemberList() {
     setLoading(true);
 
     const trimmed = debouncedSearch.trim();
-    const isSearching = trimmed.length >= MIN_SEARCH;
+    const isSearching = trimmed.length > 0;
 
     const constraints: QueryConstraint[] = [];
     if (activeOnly) constraints.push(where("activeStatus", "==", "Active"));
     if (isSearching) {
-      const prefix = titleCase(trimmed);
-      constraints.push(where("name", ">=", prefix));
-      constraints.push(where("name", "<", prefix + ""));
+      // Case-insensitive substring match (Postgres ILIKE). Backed by the
+      // (activeStatus, name) index for the common active-only case.
+      constraints.push(where("name", "ilike", `%${escapeLike(trimmed)}%`));
     }
     constraints.push(orderBy("name"));
     const startCursor = cursorsRef.current[page] ?? null;
     if (startCursor) constraints.push(startAfter(startCursor));
     constraints.push(fsLimit(PAGE_SIZE + 1)); // +1 to detect "more"
 
-    getDocs(query(collection(db, "members"), ...constraints))
+    getDocs(query(collection("members"), ...constraints))
       .then((snap) => {
         if (cancelled) return;
         const docs = snap.docs;
@@ -123,12 +125,12 @@ export function MemberList() {
         ),
       },
       {
-        accessorKey: "chapterName",
+        accessorKey: "chapterId",
         header: "Chapter",
         size: 220,
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-sm">{row.original.chapterName || "—"}</span>
+          <span className="text-sm">{nameFor(row.original.chapterId) || "—"}</span>
         ),
       },
       {
@@ -176,11 +178,11 @@ export function MemberList() {
         ),
       },
     ],
-    []
+    [nameFor]
   );
 
   const trimmed = debouncedSearch.trim();
-  const isSearching = trimmed.length >= MIN_SEARCH;
+  const isSearching = trimmed.length > 0;
 
   return (
     <div className="space-y-4">
@@ -188,7 +190,7 @@ export function MemberList() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder={`Search by name (≥ ${MIN_SEARCH} chars)…`}
+          placeholder="Search members by name…"
           className="w-full sm:max-w-md"
         />
         <label className="flex items-center gap-2 text-sm">
@@ -196,12 +198,6 @@ export function MemberList() {
           <span className="text-muted-foreground">Active only</span>
         </label>
       </div>
-
-      {!isSearching && search.trim().length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Type at least {MIN_SEARCH} letters to filter results.
-        </p>
-      )}
 
       <AdvancedDataTable<MemberRow>
         columns={columns}
@@ -213,7 +209,7 @@ export function MemberList() {
         }
         emptyDescription={
           isSearching
-            ? "Try a different search prefix"
+            ? "Try a different search term"
             : activeOnly
               ? "No active members on this page"
               : "No members on this page"

@@ -7,13 +7,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { onAuthStateChanged, signInWithCustomToken, signOut as firebaseSignOut, type User as FirebaseUser } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase/config";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { hydrateTimestamps } from "@/lib/supabase/timestamp";
+import { invalidateChaptersMap } from "@/hooks/use-chapters-map";
+import { invalidateSubevents } from "@/hooks/use-subevents";
 import type { AppUser } from "@/types/user";
 
 interface AuthContextType {
-  firebaseUser: FirebaseUser | null;
+  authUser: SupabaseUser | null;
   user: (AppUser & { uid: string }) | null;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -22,7 +24,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({
-  firebaseUser: null,
+  authUser: null,
   user: null,
   isLoading: true,
   isAuthenticated: false,
@@ -31,33 +33,131 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [user, setUser] = useState<(AppUser & { uid: string }) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      setFirebaseUser(fbUser);
+    const supabase = getSupabaseBrowser();
 
-      if (fbUser) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", fbUser.uid));
-          if (userDoc.exists()) {
-            setUser({ ...userDoc.data() as AppUser, uid: fbUser.uid });
-          } else {
-            setUser(null);
-          }
-        } catch {
-          setUser(null);
-        }
+    const loadProfile = async (sbUser: SupabaseUser | null) => {
+      if (!sbUser) {
+        setUser(null);
+        return;
+      }
+      const { data } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", sbUser.id)
+        .maybeSingle();
+      if (data) {
+        setUser({
+          ...(hydrateTimestamps(data) as AppUser),
+          uid: sbUser.id,
+        });
       } else {
         setUser(null);
       }
+    };
 
+    supabase.auth.getSession().then(async ({ data }: { data: { session: { user: SupabaseUser } | null } }) => {
+      const sbUser = data.session?.user ?? null;
+      setAuthUser(sbUser);
+      await loadProfile(sbUser);
       setIsLoading(false);
     });
 
-    return () => unsubscribe();
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event: string, session: { user: SupabaseUser } | null) => {
+        const sbUser = session?.user ?? null;
+        setAuthUser(sbUser);
+        await loadProfile(sbUser);
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Tab-recovery: the auth lock can wedge in a never-resolving state and every
+  // query then hangs forever (see lib/supabase/client.ts). The timeout-bounded
+  // lock prevents most wedges; this watchdog is the backstop that recovers any
+  // that still slip through, via two triggers:
+  //   1. Tab becomes visible after a long suspension (the classic case).
+  //   2. A periodic health-check — covers a wedge on a continuously-visible tab
+  //      (e.g. the 1h token expiry during active use), which trigger 1 misses.
+  useEffect(() => {
+    const HIDDEN_THRESHOLD_MS = 2 * 60 * 1000;
+    const REFRESH_TIMEOUT_MS = 5 * 1000;
+    const HEALTHCHECK_INTERVAL_MS = 60 * 1000;
+    const HEALTHCHECK_TIMEOUT_MS = 4 * 1000;
+    let hiddenAt: number | null = null;
+    let recovering = false;
+
+    // Force a session refresh + cache invalidation. If the refresh itself
+    // stalls, reload — same outcome as the user's manual reload but automatic.
+    const forceRefresh = async () => {
+      if (recovering) return;
+      recovering = true;
+      const supabase = getSupabaseBrowser();
+      try {
+        await Promise.race([
+          supabase.auth.refreshSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("refresh-timeout")), REFRESH_TIMEOUT_MS)
+          ),
+        ]);
+        invalidateChaptersMap();
+        invalidateSubevents();
+      } catch {
+        // Refresh stalled — the safest path is the user's manual fix.
+        window.location.reload();
+      } finally {
+        recovering = false;
+      }
+    };
+
+    const handleVisibility = async () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      if (hiddenAt == null) return;
+      const elapsed = Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (elapsed < HIDDEN_THRESHOLD_MS) return;
+      await forceRefresh();
+    };
+
+    // Probe getSession() with a short timeout. It resolves locally from the
+    // stored session, so a timeout means the auth lock is wedged — recover.
+    const healthCheck = async () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState !== "visible") return; // hidden tabs throttle timers anyway
+      if (recovering) return;
+      const supabase = getSupabaseBrowser();
+      try {
+        await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("getSession-timeout")), HEALTHCHECK_TIMEOUT_MS)
+          ),
+        ]);
+      } catch {
+        await forceRefresh();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    const interval = setInterval(healthCheck, HEALTHCHECK_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearInterval(interval);
+    };
   }, []);
 
   const signIn = () => {
@@ -65,16 +165,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    const supabase = getSupabaseBrowser();
+    await supabase.auth.signOut();
     await fetch("/api/auth/signout", { method: "POST" });
     setUser(null);
+    setAuthUser(null);
     window.location.href = "/signin";
   };
 
   return (
     <AuthContext.Provider
       value={{
-        firebaseUser,
+        authUser,
         user,
         isLoading,
         isAuthenticated: !!user,

@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { createServerClient, type CookieOptionsWithName } from "@supabase/ssr";
 import { exchangeCodeForToken, getContactInfo } from "@/lib/wild-apricot/oauth";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { supabaseAdmin } from "@/lib/supabase/server";
 
+/**
+ * Wild Apricot OAuth callback → Supabase session.
+ *
+ * Flow:
+ *   1. Validate WA state, exchange code, fetch the user's WA contact.
+ *   2. Find-or-create auth.users by email (paginated lookup).
+ *   3. Upsert public.users; new rows get needsOnboarding = true.
+ *   4. Merge user_role / chapter_id / region into auth.users.app_metadata
+ *      so the JWT carries them for RLS.
+ *   5. Generate + redeem a magic-link token_hash to set sb-* cookies.
+ */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
@@ -13,7 +25,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${appUrl}/signin?error=missing_params`);
   }
 
-  // Verify state
   const cookieStore = await cookies();
   const storedState = cookieStore.get("wa_oauth_state")?.value;
   if (state !== storedState) {
@@ -22,71 +33,139 @@ export async function GET(request: NextRequest) {
   cookieStore.delete("wa_oauth_state");
 
   try {
-    // Exchange code for WA access token
-    const tokenData = await exchangeCodeForToken(code);
-    const { access_token } = tokenData;
-
-    // Fetch user's contact info from WA
+    const { access_token } = await exchangeCodeForToken(code);
     const contact = await getContactInfo(access_token);
-
     const email = contact.Email;
+    if (!email) {
+      throw new Error("Wild Apricot contact has no email address");
+    }
     const displayName = `${contact.FirstName} ${contact.LastName}`.trim();
+    const emailLower = email.toLowerCase();
 
-    // Find or create Firebase Auth user
-    let firebaseUser;
-    try {
-      firebaseUser = await adminAuth.getUserByEmail(email);
-    } catch {
-      firebaseUser = await adminAuth.createUser({
-        email,
-        displayName,
+    const admin = supabaseAdmin();
+
+    // (#1) Find existing auth.users by email — paginate through every page,
+    // not just the first 200. listUsers caps perPage at 1000.
+    let authUserId: string | undefined;
+    const LIST_PER_PAGE = 1000;
+    for (let page = 1; ; page++) {
+      const { data, error: listErr } = await admin.auth.admin.listUsers({
+        page,
+        perPage: LIST_PER_PAGE,
       });
+      if (listErr) throw listErr;
+      const match = data.users.find(
+        (u: { id: string; email?: string | null }) =>
+          u.email?.toLowerCase() === emailLower
+      );
+      if (match) {
+        authUserId = match.id;
+        break;
+      }
+      if (data.users.length < LIST_PER_PAGE) break;
     }
 
-    const uid = firebaseUser.uid;
-    const userDoc = await adminDb.collection("users").doc(uid).get();
-    const isNewUser = !userDoc.exists;
-    let role = "member";
+    if (!authUserId) {
+      const { data: created, error: createErr } = await admin.auth.admin.createUser({
+        email,
+        email_confirm: true,
+        user_metadata: { displayName },
+      });
+      if (createErr) throw createErr;
+      authUserId = created.user?.id;
+    }
+    if (!authUserId) throw new Error("Could not resolve auth user");
 
-    if (isNewUser) {
-      // First sign-in: create doc without chapter/region — user picks during onboarding
-      await adminDb.collection("users").doc(uid).set({
+    // (#2) Decide first-time setup from needsOnboarding, not from row presence.
+    // The `on_auth_user_created` trigger creates the row immediately, so the
+    // previous `isNewUser = !existing` check was structurally always false.
+    const { data: existing } = await admin
+      .from("users")
+      .select("role, chapterId, region, needsOnboarding")
+      .eq("id", authUserId)
+      .maybeSingle();
+
+    const needsOnboarding =
+      (existing as { needsOnboarding?: boolean } | null)?.needsOnboarding ?? true;
+    const role: string =
+      (existing as { role?: string } | null)?.role ?? "member";
+    const chapterId: string | null =
+      (existing as { chapterId?: string } | null)?.chapterId ?? null;
+    const region: string | null =
+      (existing as { region?: string } | null)?.region ?? null;
+
+    if (!existing) {
+      // Trigger should have created this; fall back to an explicit insert in
+      // case the trigger ever gets dropped.
+      const { error: insErr } = await admin.from("users").insert({
+        id: authUserId,
         email,
         displayName,
-        role,
+        role: "member",
         waContactId: String(contact.Id),
         needsOnboarding: true,
-        createdAt: new Date(),
-        lastLogin: new Date(),
       });
+      if (insErr) throw insErr;
     } else {
-      // Returning user: update login info only, preserve role/chapter/region
-      role = userDoc.data()?.role || "member";
-      await adminDb
-        .collection("users")
-        .doc(uid)
-        .set(
-          {
-            email,
-            displayName,
-            waContactId: String(contact.Id),
-            lastLogin: new Date(),
-          },
-          { merge: true }
-        );
+      await admin
+        .from("users")
+        .update({
+          email,
+          displayName,
+          waContactId: String(contact.Id),
+          lastLogin: new Date().toISOString(),
+        })
+        .eq("id", authUserId);
     }
 
-    // Create Firebase custom token with claims.
-    // The client will sign in with this token, obtain an ID token, and then
-    // POST it to /api/auth/session to create a verified session cookie.
-    const chapterName = isNewUser ? null : (userDoc.data()?.chapterName || null);
-    const customToken = await adminAuth.createCustomToken(uid, {
-      role,
-      ...(chapterName ? { chapterName } : {}),
+    // (#7) Merge claims into existing app_metadata instead of replacing it.
+    const { data: authUser } = await admin.auth.admin.getUserById(authUserId);
+    const prevMeta = (authUser?.user?.app_metadata ?? {}) as Record<string, unknown>;
+    await admin.auth.admin.updateUserById(authUserId, {
+      app_metadata: {
+        ...prevMeta,
+        user_role: role,
+        chapter_id: chapterId,
+        region: region,
+      },
     });
 
-    // Redirect to callback page which will sign in client-side
-    return NextResponse.redirect(`${appUrl}/callback?token=${customToken}`);
+    const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+    });
+    if (linkErr) throw linkErr;
+    const tokenHash = linkData.properties?.hashed_token;
+    if (!tokenHash) throw new Error("generateLink returned no token_hash");
+
+    const response = NextResponse.redirect(
+      needsOnboarding ? `${appUrl}/setup` : `${appUrl}/dashboard`
+    );
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(
+            cookiesToSet: { name: string; value: string; options?: CookieOptionsWithName }[]
+          ) {
+            for (const { name, value, options } of cookiesToSet) {
+              response.cookies.set(name, value, options);
+            }
+          },
+        },
+      }
+    );
+    const { error: verifyErr } = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: "magiclink",
+    });
+    if (verifyErr) throw verifyErr;
+
+    return response;
   } catch (error) {
     console.error("Auth callback error:", error);
     return NextResponse.redirect(`${appUrl}/signin?error=auth_failed`);

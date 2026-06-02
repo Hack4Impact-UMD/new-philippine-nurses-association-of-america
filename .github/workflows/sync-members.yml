@@ -1,0 +1,37 @@
+name: Sync Members
+
+on:
+  schedule:
+    # 02:00 America/New_York ≈ 07:00 UTC (DST drifts by 1h — adjust if needed)
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install scripts deps
+        working-directory: scripts
+        run: npm ci
+
+      - name: Run sync-members
+        working-directory: scripts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WILD_APRICOT_API_KEY: ${{ secrets.WILD_APRICOT_API_KEY }}
+          WILD_APRICOT_ACCOUNT_ID: ${{ secrets.WILD_APRICOT_ACCOUNT_ID }}
+        run: npm run sync-members
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Member sync failed. Check the run logs for details."
+          # TODO: replace with a Slack / email webhook if available.

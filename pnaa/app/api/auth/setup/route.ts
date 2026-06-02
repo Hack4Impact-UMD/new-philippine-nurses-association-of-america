@@ -1,52 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { supabaseAdmin, getCaller } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("firebase_token")?.value;
-    if (!token) {
+    const { uid } = await getCaller();
+    if (!uid) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded = await adminAuth.verifySessionCookie(token);
-    const uid = decoded.uid;
-
-    // Only allow setup for users who still need onboarding
-    const userDoc = await adminDb.collection("users").doc(uid).get();
-    if (!userDoc.exists || !userDoc.data()?.needsOnboarding) {
-      return NextResponse.json(
-        { error: "Setup not required" },
-        { status: 400 }
-      );
+    const admin = supabaseAdmin();
+    const { data: userRow, error: selErr } = await admin
+      .from("users")
+      .select("needsOnboarding, role")
+      .eq("id", uid)
+      .maybeSingle();
+    if (selErr) throw selErr;
+    if (!userRow || !(userRow as { needsOnboarding: boolean }).needsOnboarding) {
+      return NextResponse.json({ error: "Setup not required" }, { status: 400 });
     }
 
     const body = await request.json();
-    const { chapterName, region } = body as {
-      chapterName: string;
-      region: string;
-    };
-
-    if (!chapterName || !region) {
+    const { chapterId, region } = body as { chapterId: string; region: string };
+    if (!chapterId || !region) {
       return NextResponse.json(
         { error: "Chapter and region are required" },
         { status: 400 }
       );
     }
 
-    await adminDb.collection("users").doc(uid).update({
-      chapterName,
-      region,
-      needsOnboarding: false,
+    // Sanity-check the chapter exists.
+    const { data: chapterRow } = await admin
+      .from("chapters")
+      .select("id")
+      .eq("id", chapterId)
+      .maybeSingle();
+    if (!chapterRow) {
+      return NextResponse.json({ error: "Unknown chapter" }, { status: 400 });
+    }
+
+    const { error: updErr } = await admin
+      .from("users")
+      .update({ chapterId, region, needsOnboarding: false })
+      .eq("id", uid);
+    if (updErr) throw updErr;
+
+    const role = (userRow as { role: string }).role;
+    // (#7) Merge into existing app_metadata so unrelated claims survive.
+    const { data: authUser } = await admin.auth.admin.getUserById(uid);
+    const prevMeta = (authUser?.user?.app_metadata ?? {}) as Record<string, unknown>;
+    await admin.auth.admin.updateUserById(uid, {
+      app_metadata: { ...prevMeta, user_role: role, chapter_id: chapterId, region },
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Setup error:", error);
-    return NextResponse.json(
-      { error: "Failed to save setup" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to save setup" }, { status: 500 });
   }
 }

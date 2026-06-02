@@ -11,8 +11,7 @@ import {
   where,
   type DocumentSnapshot,
   type QueryConstraint,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+} from "@/lib/supabase/firestore";
 import {
   AdvancedDataTable,
   type ColumnDef,
@@ -20,6 +19,7 @@ import {
 } from "@/components/shared/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,16 +32,23 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchInput } from "@/components/shared/search-input";
-import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight, Upload } from "lucide-react";
+import { BulkAttendanceUpload } from "@/components/events/bulk-attendance-upload";
+import { BulkAttendanceCsvDialog } from "@/components/events/bulk-attendance-csv";
 import { toast } from "sonner";
 import { useAuth, useIsAdmin, useIsNationalAdmin } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
+import { useSubevents } from "@/hooks/use-subevents";
 import { useDebounce } from "@/hooks/use-debounce";
+import { isNationalConference } from "@/lib/national-conference";
 import {
   setAttendance,
   setAttendeeHours,
+  setSubeventAttendance,
   addManualAttendee,
   removeManualAttendee,
-} from "@/lib/firebase/attendees";
+  manualAttendeeId,
+} from "@/lib/supabase/attendees";
 import type { Attendee } from "@/types/attendee";
 import type { AppEvent } from "@/types/event";
 import type { Member } from "@/types/member";
@@ -49,15 +56,24 @@ import type { Member } from "@/types/member";
 type AttendeeRow = Attendee & { id: string };
 
 const WA_PAGE_SIZE = 50;
-// Title-case a search prefix to match how WA stores names ("First Last").
-const titleCase = (s: string) =>
-  s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+
+/** Escape LIKE/ILIKE wildcards in user input so a literal "%" doesn't match everything. */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
 
 export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
   const { user } = useAuth();
   const isAdmin = useIsAdmin();
   const isNationalAdmin = useIsNationalAdmin();
+  const { nameFor: subeventNameFor } = useSubevents();
+  const isNational = isNationalConference(event);
+  const eventSubeventIds = useMemo(
+    () => event.subeventIds ?? [],
+    [event.subeventIds]
+  );
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
 
   // ─── WA registrations: paginated server-side ───────────────────────────
   const [waRows, setWaRows] = useState<AttendeeRow[]>([]);
@@ -80,17 +96,18 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     setWaLoading(true);
 
     const startCursor = waCursors[waPage] ?? null;
-    const constraints: QueryConstraint[] = [where("source", "==", "wildapricot")];
-    if (debouncedWaSearch.trim().length >= 2) {
-      const prefix = titleCase(debouncedWaSearch.trim());
-      constraints.push(where("name", ">=", prefix));
-      constraints.push(where("name", "<", prefix + ""));
+    const constraints: QueryConstraint[] = [
+      where("eventId", "==", event.id),
+      where("source", "==", "wildapricot"),
+    ];
+    if (debouncedWaSearch.trim().length > 0) {
+      constraints.push(where("name", "ilike", `%${escapeLike(debouncedWaSearch.trim())}%`));
     }
     constraints.push(orderBy("name"));
     if (startCursor) constraints.push(startAfter(startCursor));
     constraints.push(fsLimit(WA_PAGE_SIZE + 1)); // +1 to detect more
 
-    getDocs(query(collection(db, "events", event.id, "attendees"), ...constraints))
+    getDocs(query(collection("events", event.id, "attendees"), ...constraints))
       .then((snap) => {
         if (cancelled) return;
         const docs = snap.docs;
@@ -133,7 +150,8 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     try {
       const snap = await getDocs(
         query(
-          collection(db, "events", event.id, "attendees"),
+          collection("events", event.id, "attendees"),
+          where("eventId", "==", event.id),
           where("source", "==", "app"),
           orderBy("name")
         )
@@ -186,6 +204,46 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       toast.error("Failed to update attendance");
       // Roll back optimistic update.
       const rollback = { attended: row.attended, hours: row.hours };
+      if (row.source === "app") patchManualRow(row.id, rollback);
+      else patchWaRow(row.id, rollback);
+    }
+  };
+
+  const handleToggleSubevent = async (
+    row: AttendeeRow,
+    subeventId: string,
+    attended: boolean
+  ) => {
+    const oldArr = row.attendedSubeventIds ?? [];
+    const nextArr = attended
+      ? oldArr.includes(subeventId)
+        ? oldArr
+        : [...oldArr, subeventId]
+      : oldArr.filter((id) => id !== subeventId);
+    const nextHours = nextArr.length * (event.defaultHours ?? 0);
+    const patch = {
+      attendedSubeventIds: nextArr,
+      hours: nextHours,
+      attended: nextArr.length > 0,
+    };
+    if (row.source === "app") patchManualRow(row.id, patch);
+    else patchWaRow(row.id, patch);
+    try {
+      await setSubeventAttendance({
+        eventId: event.id,
+        attendeeId: row.id,
+        subeventId,
+        attended,
+        user: user?.email || "",
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update sub-event attendance");
+      const rollback = {
+        attendedSubeventIds: oldArr,
+        hours: row.hours,
+        attended: row.attended,
+      };
       if (row.source === "app") patchManualRow(row.id, rollback);
       else patchWaRow(row.id, rollback);
     }
@@ -302,6 +360,69 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
+  const subeventColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
+    () =>
+      eventSubeventIds.map((subeventId) => ({
+        id: `subevent:${subeventId}`,
+        header: subeventNameFor(subeventId, "Sub-event"),
+        size: 110,
+        enableSorting: false,
+        accessorFn: (row: AttendeeRow) =>
+          (row.attendedSubeventIds ?? []).includes(subeventId) ? 1 : 0,
+        cell: ({ row }: { row: { original: AttendeeRow } }) => {
+          const checked = (row.original.attendedSubeventIds ?? []).includes(
+            subeventId
+          );
+          return isAdmin ? (
+            <Checkbox
+              checked={checked}
+              onCheckedChange={(v) =>
+                handleToggleSubevent(row.original, subeventId, Boolean(v))
+              }
+              aria-label={`Toggle ${subeventNameFor(subeventId)}`}
+            />
+          ) : checked ? (
+            <Badge
+              variant="outline"
+              className="text-xs text-green-700 border-green-200 bg-green-50 dark:bg-green-950/30"
+            >
+              Yes
+            </Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          );
+        },
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [eventSubeventIds, isAdmin, subeventNameFor, event.defaultHours]
+  );
+
+  const totalHoursColumn: ColumnDef<AttendeeRow, unknown> = useMemo(
+    () => ({
+      id: "totalHours",
+      header: "Total Hours",
+      size: 110,
+      enableSorting: true,
+      accessorFn: (row) =>
+        (row.attendedSubeventIds ?? []).length * (event.defaultHours ?? 0),
+      cell: ({ row }) => {
+        const count = (row.original.attendedSubeventIds ?? []).length;
+        const total = count * (event.defaultHours ?? 0);
+        return count === 0 ? (
+          <span className="text-sm text-muted-foreground">—</span>
+        ) : (
+          <span className="tabular-nums text-sm">
+            {total}
+            <span className="ml-1 text-xs text-muted-foreground">
+              ({count}×{event.defaultHours ?? 0})
+            </span>
+          </span>
+        );
+      },
+    }),
+    [event.defaultHours]
+  );
+
   const waColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
     () => [
       {
@@ -381,10 +502,11 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
             </Badge>
           ),
       },
-      attendanceColumn,
-      hoursColumn,
+      ...(isNational
+        ? [...subeventColumns, totalHoursColumn]
+        : [attendanceColumn, hoursColumn]),
     ],
-    [isNationalAdmin, attendanceColumn, hoursColumn]
+    [isNationalAdmin, isNational, subeventColumns, totalHoursColumn, attendanceColumn, hoursColumn]
   );
 
   const manualColumns: ColumnDef<AttendeeRow, unknown>[] = useMemo(
@@ -401,8 +523,9 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           </span>
         ),
       },
-      attendanceColumn,
-      hoursColumn,
+      ...(isNational
+        ? [...subeventColumns, totalHoursColumn]
+        : [attendanceColumn, hoursColumn]),
       ...(isAdmin
         ? [
             {
@@ -428,7 +551,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           ]
         : []),
     ],
-    [isAdmin, attendanceColumn, hoursColumn]
+    [isAdmin, isNational, subeventColumns, totalHoursColumn, attendanceColumn, hoursColumn]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
@@ -444,8 +567,46 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     );
   };
 
+  // Force the manual list to refetch after a bulk upload (new attendees may
+  // have been added during conflict resolution).
+  const refetchAfterBulk = () => {
+    loadManual();
+    // The WA table refetches when its effect deps change; bump search to force.
+    setWaPage((p) => p);
+  };
+
   return (
     <div className="space-y-6">
+      {isNational && isAdmin && (
+        <section className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold">Bulk Sub-Event Attendance</p>
+            <p className="text-xs text-muted-foreground">
+              Upload a CSV (Name, Sub-Event, Attended) to mark many people at once.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setBulkUploadOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
+            Bulk Upload Attendance
+          </Button>
+        </section>
+      )}
+
+      {!isNational && isAdmin && (
+        <section className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold">Bulk Attendance</p>
+            <p className="text-xs text-muted-foreground">
+              Upload a CSV (Name, Email, Attended, Hours) to mark many people at once.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setBulkUploadOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
+            Bulk Upload Attendance
+          </Button>
+        </section>
+      )}
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h3 className="text-sm font-semibold">
@@ -466,13 +627,13 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           data={waRows}
           loading={waLoading}
           emptyTitle={
-            debouncedWaSearch.trim().length >= 2
+            debouncedWaSearch.trim().length > 0
               ? "No matching registrations"
               : "No registrations"
           }
           emptyDescription={
-            debouncedWaSearch.trim().length >= 2
-              ? "Try a different search prefix"
+            debouncedWaSearch.trim().length > 0
+              ? "Try a different search term"
               : "No Wild Apricot registrations for this event"
           }
           emptyIcon={Users}
@@ -527,6 +688,24 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           event={event}
           existingMemberIds={existingMemberIds}
           onAdded={onManualAdded}
+        />
+      )}
+
+      {isNational && isAdmin && (
+        <BulkAttendanceUpload
+          open={bulkUploadOpen}
+          onOpenChange={setBulkUploadOpen}
+          event={event}
+          onApplied={refetchAfterBulk}
+        />
+      )}
+
+      {!isNational && isAdmin && (
+        <BulkAttendanceCsvDialog
+          open={bulkUploadOpen}
+          onOpenChange={setBulkUploadOpen}
+          event={event}
+          onApplied={refetchAfterBulk}
         />
       )}
     </div>
@@ -620,10 +799,11 @@ function AddManualAttendeeDialogBody({
   onClose: () => void;
 }) {
   const { user } = useAuth();
+  const { nameFor } = useChaptersMap();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
   const [scopeChapter, setScopeChapter] = useState<boolean>(
-    Boolean(event.chapter)
+    Boolean(event.chapterId)
   );
   const [results, setResults] = useState<(Member & { id: string })[]>([]);
   const [loading, setLoading] = useState(false);
@@ -634,30 +814,27 @@ function AddManualAttendeeDialogBody({
   const [submitting, setSubmitting] = useState(false);
 
   const trimmed = debouncedSearch.trim();
-  const minSearch = 2;
 
-  // Fire a server-side prefix query only once we have ≥ 2 chars. Filters to
-  // active members, optionally scoped to the event's chapter to keep result
-  // sets small. Limited to 25 hits.
+  // Fire a server-side ILIKE substring query whenever there's any input.
+  // Filters to active members, optionally scoped to the event's chapter to
+  // keep result sets small. Limited to 25 hits.
   useEffect(() => {
     let cancelled = false;
-    if (trimmed.length < minSearch) {
+    if (trimmed.length === 0) {
       setResults([]);
       setLoading(false);
       return;
     }
     setLoading(true);
-    const prefix = titleCase(trimmed);
     const constraints: QueryConstraint[] = [where("activeStatus", "==", "Active")];
-    if (scopeChapter && event.chapter) {
-      constraints.push(where("chapterName", "==", event.chapter));
+    if (scopeChapter && event.chapterId) {
+      constraints.push(where("chapterId", "==", event.chapterId));
     }
-    constraints.push(where("name", ">=", prefix));
-    constraints.push(where("name", "<", prefix + ""));
+    constraints.push(where("name", "ilike", `%${escapeLike(trimmed)}%`));
     constraints.push(orderBy("name"));
     constraints.push(fsLimit(25));
 
-    getDocs(query(collection(db, "members"), ...constraints))
+    getDocs(query(collection("members"), ...constraints))
       .then((snap) => {
         if (cancelled) return;
         setResults(
@@ -674,7 +851,7 @@ function AddManualAttendeeDialogBody({
     return () => {
       cancelled = true;
     };
-  }, [trimmed, scopeChapter, event.chapter]);
+  }, [trimmed, scopeChapter, event.chapterId]);
 
   const isConference = event.eventType === "conference";
   const effectiveHours = isConference ? (event.defaultHours ?? 0) : hours;
@@ -692,13 +869,14 @@ function AddManualAttendeeDialogBody({
       // Mirror the doc that addManualAttendee just wrote so the parent list
       // updates without a re-fetch.
       onAdded({
-        id: `app-${selected.id}`,
-        registrationId: `app-${selected.id}`,
+        id: manualAttendeeId(event.id, selected.id),
+        registrationId: manualAttendeeId(event.id, selected.id),
         eventId: event.id,
         contactId: selected.id,
         name: selected.name,
         attended: true,
         hours: effectiveHours,
+        attendedSubeventIds: [],
         source: "app",
         memberId: selected.id,
         registrationTypeId: "",
@@ -725,7 +903,7 @@ function AddManualAttendeeDialogBody({
       <DialogHeader>
         <DialogTitle>Add Attendee</DialogTitle>
         <DialogDescription>
-          Search active members by name. Type at least {minSearch} letters.
+          Search active members by name.
         </DialogDescription>
       </DialogHeader>
 
@@ -733,11 +911,11 @@ function AddManualAttendeeDialogBody({
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder={`Search by name (≥ ${minSearch} chars)…`}
+          placeholder="Search by name…"
           className="w-full"
         />
 
-        {event.chapter && (
+        {event.chapterId && (
           <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
@@ -745,7 +923,7 @@ function AddManualAttendeeDialogBody({
               onChange={(e) => setScopeChapter(e.target.checked)}
               className="rounded border-input"
             />
-            Limit to {event.chapter}
+            Limit to {nameFor(event.chapterId)}
           </label>
         )}
 
@@ -754,7 +932,7 @@ function AddManualAttendeeDialogBody({
             <div>
               <p className="font-medium text-sm">{selected.name}</p>
               <p className="text-xs text-muted-foreground">
-                {selected.email} · {selected.chapterName || "No chapter"}
+                {selected.email} · {nameFor(selected.chapterId) || "No chapter"}
               </p>
             </div>
             <Button
@@ -765,9 +943,9 @@ function AddManualAttendeeDialogBody({
               Change
             </Button>
           </div>
-        ) : trimmed.length < minSearch ? (
+        ) : trimmed.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Type at least {minSearch} letters to search.
+            Type any part of a member name to search.
           </p>
         ) : (
           <ScrollArea className="h-64 rounded-md border">
@@ -792,7 +970,7 @@ function AddManualAttendeeDialogBody({
                         <div>
                           <p className="font-medium text-sm">{m.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {m.email} · {m.chapterName || "No chapter"}
+                            {m.email} · {nameFor(m.chapterId) || "No chapter"}
                           </p>
                         </div>
                         {alreadyAdded && (

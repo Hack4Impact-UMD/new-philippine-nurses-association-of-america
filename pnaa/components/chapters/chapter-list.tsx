@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCollectionOnce } from "@/hooks/use-firestore";
 import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
-import { orderBy } from "firebase/firestore";
+import { orderBy } from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { ChapterCard } from "./chapter-card";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -211,11 +211,11 @@ export function ChapterList() {
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return mergedChapters;
     const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return mergedChapters.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) || c.region.toLowerCase().includes(q)
+      (c) => lc(c.name).includes(q) || lc(c.region).includes(q)
     );
-  }, [mergedChapters,debouncedSearch]);
+  }, [mergedChapters, debouncedSearch]);
 
   const handleViewChange = (v: ViewMode) => {
     setView(v);

@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCollection } from "@/hooks/use-firestore";
-import { where, orderBy, limit } from "firebase/firestore";
+import { where, orderBy, limit } from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { EventCard } from "./event-card";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -16,6 +16,7 @@ import { Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useIsNationalAdmin } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { formatDate } from "@/lib/utils";
 import type { AppEvent } from "@/types/event";
 
@@ -24,7 +25,15 @@ type EventRow = AppEvent & { id: string };
 
 const STORAGE_KEY = "pnaa-events-view";
 
-const baseColumns: ColumnDef<EventRow, unknown>[] = [
+/**
+ * Builds column defs. The chapter / region cells need the chapters lookup,
+ * which only exists inside the component — hence the factory.
+ */
+function buildColumns(
+  nameFor: (id: string | null | undefined) => string,
+  regionFor: (id: string | null | undefined) => string,
+): ColumnDef<EventRow, unknown>[] {
+  return [
   {
     accessorKey: "name",
     header: "Event Name",
@@ -65,23 +74,23 @@ const baseColumns: ColumnDef<EventRow, unknown>[] = [
       ),
   },
   {
-    accessorKey: "chapter",
+    accessorKey: "chapterId",
     header: "Chapter",
     size: 180,
     enableSorting: true,
     meta: { filterType: "text" } satisfies ColumnMeta,
     cell: ({ row }) => (
-      <span className="text-sm">{row.original.chapter || "—"}</span>
+      <span className="text-sm">{nameFor(row.original.chapterId) || "—"}</span>
     ),
   },
   {
-    accessorKey: "region",
+    id: "region",
     header: "Region",
     size: 140,
     enableSorting: true,
     meta: { filterType: "text" } satisfies ColumnMeta,
     cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">{row.original.region}</span>
+      <span className="text-sm text-muted-foreground">{regionFor(row.original.chapterId)}</span>
     ),
   },
   {
@@ -199,15 +208,18 @@ const baseColumns: ColumnDef<EventRow, unknown>[] = [
         </Badge>
       ),
   },
-];
+  ];
+}
 
 export function EventList() {
   const router = useRouter();
   const isNationalAdmin = useIsNationalAdmin();
+  const { nameFor, regionFor } = useChaptersMap();
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("upcoming");
   const [showArchived, setShowArchived] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
+  const baseColumns = useMemo(() => buildColumns(nameFor, regionFor), [nameFor, regionFor]);
   const columns = useMemo(
     () =>
       isNationalAdmin
@@ -215,7 +227,7 @@ export function EventList() {
         : baseColumns.filter(
             (c) => !("accessorKey" in c && c.accessorKey === "totalRevenue")
           ),
-    [isNationalAdmin]
+    [isNationalAdmin, baseColumns]
   );
   const [view, setView] = useState<ViewMode>(() => {
     if (typeof window !== "undefined") {
@@ -274,13 +286,14 @@ export function EventList() {
   const filteredForCards = useMemo(() => {
     if (!debouncedSearch) return data;
     const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return data.filter(
       (e) =>
-        e.name.toLowerCase().includes(q) ||
-        e.chapter.toLowerCase().includes(q) ||
-        e.location?.toLowerCase().includes(q)
+        lc(e.name).includes(q) ||
+        lc(nameFor(e.chapterId)).includes(q) ||
+        lc(e.location).includes(q)
     );
-  }, [data, debouncedSearch]);
+  }, [data, debouncedSearch, nameFor]);
 
   const handleViewChange = (v: ViewMode) => {
     setView(v);

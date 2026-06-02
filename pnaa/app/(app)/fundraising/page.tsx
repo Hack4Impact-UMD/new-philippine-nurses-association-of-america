@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-auth";
+import { BulkCampaignUploadButton } from "@/components/fundraising/bulk-campaign-upload";
 
 export default function FundraisingPage() {
   const isAdmin = useIsAdmin();
@@ -17,12 +18,15 @@ export default function FundraisingPage() {
         description="All fundraising campaigns across PNAA"
       >
         {isAdmin && (
-          <Link href="/fundraising/new">
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Campaign
+          <div className="flex items-center gap-2">
+            <BulkCampaignUploadButton />
+            <Button asChild>
+              <Link href="/fundraising/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Campaign
+              </Link>
             </Button>
-          </Link>
+          </div>
         )}
       </PageHeader>
       <CampaignList />

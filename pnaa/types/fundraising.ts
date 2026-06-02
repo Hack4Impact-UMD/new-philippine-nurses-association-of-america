@@ -1,8 +1,9 @@
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supabase/timestamp";
 
 export interface FundraisingCampaign {
   fundraiserName: string;
-  chapterName: string;
+  /** FK to chapters.id — null for national campaigns. */
+  chapterId: string | null;
   subchapterId?: string;
   date: string;
   amount: number;

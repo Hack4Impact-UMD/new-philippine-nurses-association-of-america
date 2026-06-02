@@ -8,6 +8,9 @@ export interface Attendee {
   attended: boolean;
   // App-managed: hours earned for this attendee on this event.
   hours: number;
+  // National conferences only: sub-events this attendee was marked present at.
+  // Empty / unused on other event types. hours = cardinality * event.defaultHours.
+  attendedSubeventIds: string[];
   // Source of the record. "wildapricot" rows come from WA registrations; "app"
   // rows are admins manually adding someone who showed up.
   source: "wildapricot" | "app";

@@ -26,12 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileUpload } from "@/components/shared/file-upload";
-import { addDocument, updateDocument } from "@/lib/firebase/firestore";
-import { uploadEventPoster } from "@/lib/firebase/storage";
-import { propagateConferenceDefaultHours } from "@/lib/firebase/attendees";
+import { addDocument, updateDocument } from "@/lib/supabase/firestore";
+import { propagateConferenceDefaultHours } from "@/lib/supabase/attendees";
+import { stripChapterPrefix } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { Timestamp } from "firebase/firestore";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
+import { Timestamp } from "@/lib/supabase/firestore";
+import { isNationalConference } from "@/lib/national-conference";
+import { SubeventPicker } from "@/components/events/subevent-picker";
 import {
   EVENT_TYPE_LABELS,
   EVENT_SUBTYPE_LABELS,
@@ -48,8 +50,7 @@ const eventSchema = z.object({
   startTime: z.string(),
   endTime: z.string(),
   location: z.string(),
-  chapter: z.string().min(1, "Chapter is required"),
-  region: z.string(),
+  chapterId: z.string().min(1, "Chapter is required"),
   about: z.string(),
   eventType: z.enum(["conference", "community_outreach"]),
   eventSubtype: z.enum([
@@ -64,6 +65,7 @@ const eventSchema = z.object({
   participantsServed: z.number().min(0),
   volunteerHours: z.number().min(0),
   archived: z.boolean(),
+  subeventIds: z.array(z.string()),
 });
 
 type EventFormValues = z.infer<typeof eventSchema>;
@@ -77,12 +79,11 @@ export function EventForm({ event, mode }: EventFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const { canonical: chapters } = useChaptersMap();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [posterFile, setPosterFile] = useState<File | null>(null);
 
   const subchapterId = searchParams.get("subchapterId") || undefined;
-  const chapterFromParams = searchParams.get("chapter") || "";
-  const regionFromParams = searchParams.get("region") || "";
+  const chapterIdFromParams = searchParams.get("chapterId") || "";
 
   const form = useForm<EventFormValues>({
     resolver: zodResolver(eventSchema),
@@ -93,8 +94,7 @@ export function EventForm({ event, mode }: EventFormProps) {
       startTime: event?.startTime || "",
       endTime: event?.endTime || "",
       location: event?.location || "",
-      chapter: event?.chapter || chapterFromParams,
-      region: event?.region || regionFromParams,
+      chapterId: event?.chapterId || chapterIdFromParams,
       about: event?.about || "",
       eventType: event?.eventType || "conference",
       eventSubtype: event?.eventSubtype || "in_person",
@@ -103,18 +103,27 @@ export function EventForm({ event, mode }: EventFormProps) {
       participantsServed: event?.participantsServed || 0,
       volunteerHours: event?.volunteerHours || 0,
       archived: event?.archived || false,
+      subeventIds: event?.subeventIds ?? [],
     },
   });
 
   // Watch type to filter subtype options and label the hours field appropriately.
   const watchedType = form.watch("eventType") as EventType;
+  const watchedChapter = form.watch("chapterId");
+  const watchedSubeventIds = form.watch("subeventIds");
   const subtypeOptions = SUBTYPES_BY_TYPE[watchedType] ?? [];
-  const hoursLabel =
-    watchedType === "conference"
+  const isNational = isNationalConference({
+    eventType: watchedType,
+    chapterId: watchedChapter,
+  } as AppEvent);
+  const hoursLabel = isNational
+    ? "Hours per sub-event"
+    : watchedType === "conference"
       ? "Hours per attendee"
       : "Default hours (autofilled per attendee)";
-  const hoursDescription =
-    watchedType === "conference"
+  const hoursDescription = isNational
+    ? "Each sub-event attended earns this many hours. Total = hours × sub-events attended."
+    : watchedType === "conference"
       ? "Every attendee marked attended earns this many hours."
       : "Prefilled for each attendee — admins can override per person.";
 
@@ -128,21 +137,13 @@ export function EventForm({ event, mode }: EventFormProps) {
         ? values.eventSubtype
         : validSubtypes[0];
 
-      let eventPoster = event?.eventPoster || {
-        name: "",
-        ref: "",
-        downloadURL: "",
-      };
-
       const eventData = {
         ...values,
         eventSubtype: subtype,
         location: values.location || "",
-        region: values.region || "",
         about: values.about || "",
         startTime: values.startTime || "",
         endTime: values.endTime || "",
-        eventPoster,
         lastUpdatedUser: user?.email || "",
         lastUpdated: Timestamp.now(),
       };
@@ -162,20 +163,14 @@ export function EventForm({ event, mode }: EventFormProps) {
           ...(subchapterId ? { subchapterId } : {}),
         });
 
-        if (posterFile) {
-          eventPoster = await uploadEventPoster(docId, posterFile);
-          await updateDocument("events", docId, { eventPoster });
-        }
-
         toast.success("Event created successfully");
         router.push(`/events/${docId}`);
       } else if (event) {
-        if (posterFile) {
-          eventPoster = await uploadEventPoster(event.id, posterFile);
-          eventData.eventPoster = eventPoster;
-        }
-
-        await updateDocument("events", event.id, eventData);
+        // In edit mode subeventIds is owned by SubeventPicker (already committed
+        // via RPC). Omit it from the update so we don't clobber attendee cleanup.
+        const { subeventIds: _ignoredSubeventIds, ...editData } = eventData;
+        void _ignoredSubeventIds;
+        await updateDocument("events", event.id, editData);
 
         // For conferences, propagate any defaultHours (or type) change to every
         // attended attendee — keeps the "live" rule the user asked for.
@@ -354,34 +349,37 @@ export function EventForm({ event, mode }: EventFormProps) {
               )}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="chapter"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Chapter</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Chapter name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="region"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Region</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Region" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+            <FormField
+              control={form.control}
+              name="chapterId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Chapter</FormLabel>
+                  <FormControl>
+                    <Select
+                      value={field.value}
+                      onValueChange={(value) => field.onChange(value)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a chapter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chapters
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {stripChapterPrefix(c.name)}
+                              {c.region ? ` · ${c.region}` : ""}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}
@@ -401,15 +399,6 @@ export function EventForm({ event, mode }: EventFormProps) {
               )}
             />
 
-            <div>
-              <label className="text-sm font-medium">Event Poster</label>
-              <div className="mt-2">
-                <FileUpload
-                  onFileSelect={setPosterFile}
-                  currentUrl={event?.eventPoster?.downloadURL}
-                />
-              </div>
-            </div>
           </CardContent>
         </Card>
 
@@ -476,6 +465,28 @@ export function EventForm({ event, mode }: EventFormProps) {
             </div>
           </CardContent>
         </Card>
+
+        {isNational && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Sub-events</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                National conferences track attendance per sub-event. Pick from
+                the shared catalog or type a new name to add it.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <SubeventPicker
+                eventId={mode === "edit" ? event?.id : undefined}
+                value={watchedSubeventIds}
+                onChange={(next) =>
+                  form.setValue("subeventIds", next, { shouldDirty: true })
+                }
+                user={user?.email || ""}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardContent className="pt-6">

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/lib/auth/context";
-import { useCollection } from "@/hooks/use-firestore";
+import { useChaptersMap, type ChapterRow } from "@/hooks/use-chapters-map";
 import {
   Select,
   SelectContent,
@@ -13,16 +13,17 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import type { Chapter } from "@/types/chapter";
+import { stripChapterPrefix } from "@/lib/utils";
 
 export default function SetupPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuthContext();
-  const { data: chapters, loading: chaptersLoading } =
-    useCollection<Chapter>("chapters");
+  // Pickers must use the canonical list — aliased chapter rows still exist in
+  // the chapters table but selecting one strands the user under a dead chapter.
+  const { canonical: chapters, loading: chaptersLoading } = useChaptersMap();
 
   const [region, setRegion] = useState("");
-  const [chapterName, setChapterName] = useState("");
+  const [chapterId, setChapterId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,11 +55,11 @@ export default function SetupPage() {
 
   const handleRegionChange = (value: string) => {
     setRegion(value);
-    setChapterName("");
+    setChapterId("");
   };
 
   const handleSubmit = async () => {
-    if (!region || !chapterName) return;
+    if (!region || !chapterId) return;
 
     setSaving(true);
     setError(null);
@@ -67,7 +68,7 @@ export default function SetupPage() {
       const res = await fetch("/api/auth/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapterName, region }),
+        body: JSON.stringify({ chapterId, region }),
       });
 
       if (!res.ok) {
@@ -131,14 +132,14 @@ export default function SetupPage() {
           {region && (
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
-              <Select value={chapterName} onValueChange={setChapterName}>
+              <Select value={chapterId} onValueChange={setChapterId}>
                 <SelectTrigger id="chapter" className="w-full">
                   <SelectValue placeholder="Select your chapter..." />
                 </SelectTrigger>
                 <SelectContent>
                   {filteredChapters.map((c) => (
-                    <SelectItem key={c.name} value={c.name}>
-                      {c.name}
+                    <SelectItem key={c.id} value={c.id}>
+                      {stripChapterPrefix(c.name)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -156,7 +157,7 @@ export default function SetupPage() {
           <Button
             className="w-full"
             onClick={handleSubmit}
-            disabled={!region || !chapterName || saving}
+            disabled={!region || !chapterId || saving}
           >
             {saving ? "Saving..." : "Continue"}
           </Button>

@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { where, orderBy } from "firebase/firestore";
+import { where, orderBy } from "@/lib/supabase/firestore";
 import { useDocument, useCollection } from "@/hooks/use-firestore";
 import { useAuth, useIsAdmin } from "@/hooks/use-auth";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { EventCard } from "@/components/events/event-card";
-import { updateDocument, archiveDocument } from "@/lib/firebase/firestore";
+import { updateDocument, archiveDocument } from "@/lib/supabase/firestore";
 import { toast } from "sonner";
 import { Building2, Users, Plus, X, Search, Pencil, Trash2 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
@@ -40,6 +41,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = useIsAdmin();
+  const { nameFor } = useChaptersMap();
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -55,18 +57,18 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
 
   const memberConstraints = useMemo(
     () =>
-      subchapter?.chapterName
+      subchapter?.chapterId
         ? [
-            where("chapterName", "==", subchapter.chapterName),
+            where("chapterId", "==", subchapter.chapterId),
             orderBy("name", "asc"),
           ]
         : [],
-    [subchapter?.chapterName]
+    [subchapter?.chapterId]
   );
 
   const { data: chapterMembers, loading: membersLoading } = useCollection<Member>(
     "members",
-    subchapter?.chapterName ? memberConstraints : []
+    subchapter?.chapterId ? memberConstraints : []
   );
 
   const eventConstraints = useMemo(
@@ -109,9 +111,9 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
 
   const filteredAvailable = useMemo(() => {
     const q = search.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
     return availableMembers.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)
+      (m) => lc(m.name).includes(q) || lc(m.email).includes(q)
     );
   }, [availableMembers, search]);
 
@@ -196,8 +198,8 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
     );
   }
 
-  const addEventUrl = `/events/new?subchapterId=${subchapterId}&chapter=${encodeURIComponent(subchapter.chapterName)}&region=${encodeURIComponent(subchapter.region)}`;
-  const addCampaignUrl = `/fundraising/new?subchapterId=${subchapterId}&chapterName=${encodeURIComponent(subchapter.chapterName)}`;
+  const addEventUrl = `/events/new?subchapterId=${subchapterId}&chapterId=${encodeURIComponent(subchapter.chapterId)}`;
+  const addCampaignUrl = `/fundraising/new?subchapterId=${subchapterId}&chapterId=${encodeURIComponent(subchapter.chapterId)}`;
 
   return (
     <div className="space-y-6">
@@ -213,7 +215,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
               href={`/chapters/${chapterId}`}
               className="text-sm text-muted-foreground hover:underline"
             >
-              {subchapter.chapterName}
+              {nameFor(subchapter.chapterId)}
             </Link>
           </div>
         </div>

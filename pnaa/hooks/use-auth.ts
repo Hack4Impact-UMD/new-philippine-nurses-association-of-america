@@ -25,9 +25,10 @@ export function useIsAdmin(): boolean {
   );
 }
 
+/** Chapter id (FK to chapters.id) for the current user. */
 export function useUserChapter(): string | undefined {
   const { user } = useAuthContext();
-  return user?.chapterName;
+  return user?.chapterId ?? undefined;
 }
 
 export function useUserRegion(): string | undefined {

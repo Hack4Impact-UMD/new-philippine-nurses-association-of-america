@@ -1,10 +1,4 @@
-import { Timestamp } from "firebase/firestore";
-
-export interface EventPoster {
-  name: string;
-  ref: string;
-  downloadURL: string;
-}
+import { Timestamp } from "@/lib/supabase/timestamp";
 
 export type EventType = "conference" | "community_outreach";
 
@@ -39,21 +33,19 @@ export interface AppEvent {
   startDate: string;
   endDate: string;
   location: string;
-  chapter: string;
-  region: string;
+  /** FK to chapters.id — null for national / cross-chapter events. */
+  chapterId: string | null;
   archived: boolean;
 
   // Type / subtype
   eventType: EventType;
   eventSubtype: EventSubtype;
-  // Hours every attendee earns (conference: applied to all attendees; community outreach: prefill default).
   defaultHours: number;
 
   // Enrichment fields
   about: string;
   startTime: string;
   endTime: string;
-  eventPoster: EventPoster;
 
   // Metrics
   attendees: number;
@@ -62,13 +54,16 @@ export interface AppEvent {
   totalRevenue: number;
   volunteers: number;
   participantsServed: number;
-  // Sum of attendees' hours where attended === true. Maintained by the app on attendee writes.
   contactHours: number;
-  // Number of attendee docs with attended === true.
   attendedCount: number;
   volunteerHours: number;
+
   // Subchapter association (optional)
   subchapterId?: string;
+
+  // National conferences only: ordered list of sub-events drawn from the
+  // subevents catalog. Empty / unused on other event types.
+  subeventIds: string[];
 
   // Metadata
   source: "wildapricot" | "app";

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useCollection } from "@/hooks/use-firestore";
+import { useChaptersMap, type ChapterRow } from "@/hooks/use-chapters-map";
 import {
   AdvancedDataTable,
   type ColumnDef,
@@ -24,9 +25,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { stripChapterPrefix } from "@/lib/utils";
 import { toast } from "sonner";
 import type { AppUser, UserRole } from "@/types/user";
-import type { Chapter } from "@/types/chapter";
 import { Users, Pencil } from "lucide-react";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -59,13 +60,13 @@ type UserWithId = AppUser & { id: string };
 
 interface EditUserDialogProps {
   user: UserWithId | null;
-  chapters: (Chapter & { id: string })[];
+  chapters: ChapterRow[];
   onClose: () => void;
 }
 
 function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
   const [role, setRole] = useState<UserRole>(user?.role ?? "member");
-  const [chapterName, setChapterName] = useState(user?.chapterName ?? "");
+  const [chapterId, setChapterId] = useState<string>(user?.chapterId ?? "");
   const [region, setRegion] = useState(user?.region ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -87,13 +88,13 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
     setRole(newRole);
     if (newRole === "national_admin" || newRole === "member") {
       setRegion("");
-      setChapterName("");
+      setChapterId("");
     }
   };
 
-  const handleChapterChange = (name: string) => {
-    setChapterName(name);
-    const chapter = chapters.find((c) => c.name === name);
+  const handleChapterChange = (id: string) => {
+    setChapterId(id);
+    const chapter = chapters.find((c) => c.id === id);
     if (chapter?.region) setRegion(chapter.region);
   };
 
@@ -104,7 +105,7 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
       toast.error("Please select a region for Region Admin");
       return;
     }
-    if (role === "chapter_admin" && !chapterName) {
+    if (role === "chapter_admin" && !chapterId) {
       toast.error("Please select a chapter for Chapter Admin");
       return;
     }
@@ -116,7 +117,7 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           role,
-          chapterName: role === "chapter_admin" ? chapterName : null,
+          chapterId: role === "chapter_admin" ? chapterId : null,
           region:
             role === "region_admin" || role === "chapter_admin" ? region : null,
         }),
@@ -224,14 +225,14 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
           {role === "chapter_admin" && (
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
-              <Select value={chapterName} onValueChange={handleChapterChange}>
+              <Select value={chapterId} onValueChange={handleChapterChange}>
                 <SelectTrigger id="chapter">
                   <SelectValue placeholder="Select chapter..." />
                 </SelectTrigger>
                 <SelectContent>
                   {filteredChapters.map((c) => (
-                    <SelectItem key={c.id} value={c.name}>
-                      {c.name}
+                    <SelectItem key={c.id} value={c.id}>
+                      {stripChapterPrefix(c.name)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -260,7 +261,9 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
 
 export function UserList() {
   const { data: users, loading } = useCollection<AppUser>("users");
-  const { data: chapters } = useCollection<Chapter>("chapters");
+  // canonical drives the picker; nameFor resolves any chapterId (including
+  // aliased rows) for display in the table.
+  const { canonical: chapters, nameFor } = useChaptersMap();
   const [editing, setEditing] = useState<UserWithId | null>(null);
   const [globalFilter, setGlobalFilter] = useState("");
 
@@ -312,15 +315,17 @@ export function UserList() {
         meta: { filterType: "text" },
       },
       {
-        accessorKey: "chapterName",
+        accessorKey: "chapterId",
         header: "Chapter",
         size: 200,
-        cell: ({ row }) =>
-          row.original.chapterName ? (
-            <span className="text-sm">{row.original.chapterName}</span>
+        cell: ({ row }) => {
+          const name = nameFor(row.original.chapterId);
+          return name ? (
+            <span className="text-sm">{name}</span>
           ) : (
             <span className="text-muted-foreground/40 text-sm">—</span>
-          ),
+          );
+        },
         meta: { filterType: "text" },
       },
       {
@@ -366,7 +371,7 @@ export function UserList() {
         ),
       },
     ],
-    []
+    [nameFor]
   );
 
   return (

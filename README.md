@@ -1,6 +1,19 @@
 # Philippine Nurses Association of America — Chapter Management System
 
-A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, events, and fundraising campaigns. Built with Next.js and Firebase, integrated with Wild Apricot for membership data.
+A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, events, and fundraising campaigns. Built with Next.js and Supabase, integrated with Wild Apricot for membership data.
+
+> **Migration note (May 2026):** Moved off Firebase (Auth, Firestore, Storage, Cloud Functions) onto **Supabase** (Auth, Postgres, Edge Functions). At the same time the schema was **normalized** — every chapter reference is now a real foreign key (`chapterId`) rather than a duplicated chapter-name string. The event-poster upload feature was dropped, so Supabase Storage is not in scope. The migration is complete; the full state lives in the versioned SQL under [supabase/migrations/](supabase/migrations/).
+>
+> **First-user bootstrap:** new sign-ins land with role `member`. There is no in-app self-promotion path, so the very first `national_admin` must be set by hand. Run this once in the Supabase SQL editor, then sign out and back in for a fresh JWT — after that the in-app `/users` page can promote everyone else:
+>
+> ```sql
+> update public.users set role = 'national_admin' where email = 'you@example.com';
+> update auth.users
+> set raw_app_meta_data =
+>       coalesce(raw_app_meta_data, '{}'::jsonb)
+>       || jsonb_build_object('user_role', 'national_admin')
+> where email = 'you@example.com';
+> ```
 
 ---
 
@@ -14,9 +27,10 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - [Environment Variables](#environment-variables)
 - [Staging Environment](#staging-environment)
 - [Getting Started](#getting-started)
-- [Firebase Cloud Functions](#firebase-cloud-functions)
+- [Supabase Edge Functions & Sync Jobs](#supabase-edge-functions--sync-jobs)
 - [Roles & Permissions](#roles--permissions)
 - [Event Types & Hours Tracking](#event-types--hours-tracking)
+- [Bulk CSV Upload](#bulk-csv-upload)
 - [Read/Write Optimization](#readwrite-optimization)
 - [Data Models](#data-models)
 
@@ -27,7 +41,7 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - **Dashboard** — Real-time stats (total/active/lapsed members, chapters, upcoming events, total fundraised) plus chapter-list, fundraising-progress, and upcoming-events widgets
 - **Chapter Management** — Browse all chapters, view chapter-level member breakdowns and activity charts; chapter aliases merge stats from alternative Wild Apricot names
 - **Event Management** — Create, edit, and view events with type/subtype (Conference: In Person / Webinar; Community Outreach: Medical Mission / Health Screening / Volunteerism). Per-event attendee subcollection mixes Wild Apricot registrations with manually-added attendees. Admins toggle attendance and edit per-attendee hours; conferences apply a uniform `defaultHours` to all attended attendees, community outreach prefills it but lets admins override per person. Revenue figures and attendee payment amounts are gated to national admins.
-- **Member Directory** — Paginated `/members` listing with server-side prefix search (≥ 2 chars) and an "Active only" toggle. Per-member detail page shows total hours, events attended, and a breakdown of conference vs. community outreach hours, with a table of every event the member was marked attended on.
+- **Member Directory** — Paginated `/members` listing with case-insensitive substring search (Postgres `ILIKE`) and an "Active only" toggle. Per-member detail page shows total hours, events attended, and a breakdown of conference vs. community outreach hours, with a table of every event the member was marked attended on.
 - **Fundraising** — Track fundraising campaigns with amounts, notes, chapter and optional subchapter attribution; campaign trend chart on detail pages
 - **Subchapters** — Create subchapters within chapters, assign members, soft-delete support; events and fundraising can be tagged to a subchapter
 - **Member Sync** — Wild Apricot membership sync via real-time webhooks (Contact / Membership / MembershipRenewed / Event / EventRegistration). Manual full-sync HTTP endpoints (`syncMembers` is diff-aware — skips writes for unchanged docs) plus a daily 2 AM ET scheduled status recalculation (`updateMembers`) that only touches expired-renewal rows.
@@ -36,7 +50,8 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - **User Management** — National admins can view all users and update roles, regions, and chapter assignments
 - **Advanced Data Tables** — Chapters, Events, and Fundraising pages feature a rich table view with sortable, resizable, and drag-to-reorder columns; per-column filters; column visibility toggles; and pagination. Switchable to a card grid via a pill toggle.
 - **Excel Export** — Tabular data exports to `.xlsx` via ExcelJS for offline analysis
-- **Charts** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress
+- **Bulk CSV Upload** — Admins can import spreadsheets instead of clicking row-by-row: event attendance (matched to members by email then name), fundraising campaigns, event creation, and sub-event attendance (national conferences). A shared dialog parses the CSV, classifies each row (ready / needs-resolution / skipped), lets the admin resolve conflicts inline (ambiguous names, unknown chapters, lapsed members), then applies. See [Bulk Upload](#bulk-csv-upload).
+- **Charts & Insights** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress, plus dedicated insights panels: chapter insights, fundraising insights, and a Members insights dashboard (region health, membership-level retention, education mix, and a 24-month renewal-cliff projection) served as a single JSON blob by the `member_insights()` RPC rather than shipping all ~14k rows to the client. The fundraising and Members insights panels are visible to **chapter admins and above** (members see the plain lists); the aggregates span every chapter.
 - **Responsive UI** — Mobile-friendly with sidebar navigation and dark mode support
 
 ---
@@ -66,10 +81,11 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 ### Backend & Infrastructure
 | Technology | Purpose |
 |---|---|
-| Firebase Auth | Authentication via custom tokens + session cookies |
-| Firestore | Primary NoSQL database |
-| Firebase Storage | Event poster image uploads (5MB max, images only) |
-| Firebase Cloud Functions | Scheduled data sync + real-time webhooks from Wild Apricot |
+| Supabase Auth (GoTrue) | Authentication via JWT cookies set by `/api/auth/callback` after the Wild Apricot OAuth handshake |
+| Supabase Postgres | Primary relational database (`public.*` tables); RLS enforces per-role access |
+| Supabase Edge Functions (Deno) | Real-time WA webhook handler + on-demand event sync (`supabase/functions/`) |
+| GitHub Actions (cron) | Nightly full member sync (`.github/workflows/sync-members.yml` → `scripts/sync-members.ts`) — lives outside Edge Functions because the WA contacts job exceeds the 400s function ceiling |
+| pg_cron | Daily SQL job `update_member_status()` flips Active/Lapsed and rebuilds chapter aggregates |
 | Wild Apricot | Membership management platform (OAuth 2.0 integration) |
 
 ---
@@ -77,79 +93,78 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                            Next.js App                              │
-│  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐ │
-│  │ Dashboard │  │ Events │  │ Members │  │ Chapters │  │ Funding  │ │
-│  └──────────┘  └────────┘  └─────────┘  └──────────┘  └──────────┘ │
-│            │ Live listeners on volatile data + one-shot reads on    │
-│            │ slow-changing collections (members, chapters, aliases) │
-└────────────┼────────────────────────────────────────────────────────┘
-                      │
-        ┌─────────────┴───────────────────┐
-        │           Firestore             │
-        │  members / chapters /           │
-        │  events (+ attendees subcoll) / │
-        │  fundraising / subchapters /    │
-        │  users / chapter_aliases        │
-        └──────────┬──────────────────────┘
-                   │
-     ┌──────────────┴──────────────────────┐
-     │       Firebase Cloud Functions      │
-     │  • syncMembers     (HTTP, manual)   │
-     │  • syncEvents      (HTTP, manual)   │
-     │  • updateMembers   (cron, daily 2AM)│
-     │  • wildApricotWebhook (HTTP)        │
-     │  • createUser      (callable)       │
-     └──────────┬──────────────────────────┘
-                │ Wild Apricot REST API
-     ┌──────────┴──────────────────┐
-     │       Wild Apricot          │
-     │  (Membership management)    │
-     │  Webhooks → Cloud Functions │
-     └─────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                              Next.js App                             │
+│  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ Dashboard│  │ Events │  │ Members │  │ Chapters │  │ Funding  │  │
+│  └──────────┘  └────────┘  └─────────┘  └──────────┘  └──────────┘  │
+│  Realtime channels for volatile views + one-shot selects for slow    │
+│  collections (members, chapters, aliases). See lib/supabase/         │
+└─────────────┼────────────────────────────────────────────────────────┘
+              │
+   ┌──────────┴─────────────────────────────┐
+   │      Supabase Postgres (RLS on)        │
+   │  members / chapters / events /         │
+   │  attendees / fundraising / subchapters │
+   │  users / chapter_aliases               │
+   │  pending_registrations / sync_logs     │
+   └──────────┬─────────────────────────────┘
+              │
+   ┌──────────┴─────────────────────────────┐
+   │      Supabase Edge Functions (Deno)    │
+   │  • sync-events           (HTTP)        │
+   │  • wild-apricot-webhook  (HTTP)        │
+   │                                        │
+   │      pg_cron job                       │
+   │  • update_member_status() (daily 02ET) │
+   │                                        │
+   │      GitHub Actions (cron)             │
+   │  • sync-members.yml      (nightly)     │
+   │     → scripts/sync-members.ts          │
+   └──────────┬─────────────────────────────┘
+              │ Wild Apricot REST API
+   ┌──────────┴─────────────────┐
+   │       Wild Apricot         │
+   │  (Membership management)   │
+   │  Webhooks → Edge Function  │
+   └────────────────────────────┘
 ```
 
 ---
 
 ## Authentication Flow
 
-Authentication uses Wild Apricot OAuth 2.0 to identify users, then issues Firebase session cookies for secure server-side verification.
+Authentication uses Wild Apricot OAuth 2.0 to identify users, then exchanges a Supabase Admin API magic-link for a real Supabase session — no hand-minted JWTs. Cookies are written via [`@supabase/ssr`](https://github.com/supabase/auth-helpers). This means the flow is forward-compatible with Supabase's asymmetric-JWT signing keys.
 
 ```
 1. User visits /signin
 2. GET /api/auth/signin
-   → Generates CSRF state, sets httpOnly state cookie
+   → Generates CSRF state, sets httpOnly wa_oauth_state cookie
    → Redirects to Wild Apricot OAuth login URL
 3. Wild Apricot redirects to GET /api/auth/callback?code=...&state=...
    → Validates state cookie (CSRF protection)
    → Exchanges authorization code for Wild Apricot access token
    → Fetches user contact info from Wild Apricot API
-   → Creates or finds Firebase Auth user by email
-   → Creates Firestore /users/{uid} doc (new users get needsOnboarding: true)
-   → Returning users: only lastLogin is updated (chapter/region preserved)
-   → Issues Firebase custom token with role claims
-   → Redirects to /callback?token=<customToken>
-4. Client-side /callback page:
-   → Signs into Firebase with custom token (signInWithCustomToken)
-   → Obtains ID token from the signed-in user (getIdToken)
-   → POSTs ID token to /api/auth/session
-   → Server creates a verified session cookie (createSessionCookie)
-   → Sets httpOnly cookie "firebase_token" (1 hour)
+   → Finds or creates auth.users row by email (Supabase Admin API)
+   → Upserts public.users row (new users get needsOnboarding: true)
+   → Writes role / chapter_id / region into auth.users.app_metadata
+   → admin.auth.admin.generateLink({ type: 'magiclink', email })
+   → supabase.auth.verifyOtp({ token_hash, type: 'magiclink' })
+     ↳ Supabase issues a real session JWT and writes sb-* cookies on the response
    → Redirects to /setup (new users) or /dashboard (returning users)
-5. /setup page (first-time only):
+4. /setup page (first-time only):
    → User selects their region, then their chapter
-   → Saves via POST /api/auth/setup → sets needsOnboarding: false
+   → POST /api/auth/setup updates public.users and app_metadata
    → Redirects to /dashboard
-6. Protected routes:
-   → Middleware checks firebase_token cookie existence
-   → API routes verify the cookie via verifySessionCookie (cryptographic check)
+5. Protected routes:
+   → middleware.ts refreshes the session and gates protected prefixes
+   → API routes call getCaller() which reads the session via @supabase/ssr
    → OnboardingGuard in app layout redirects to /setup if needsOnboarding
 ```
 
 **Key security properties:**
-- Session cookies are created by `createSessionCookie` and verified by `verifySessionCookie` — cryptographic verification on every API call
-- The `firebase_token` cookie is httpOnly, secure (in production), SameSite=Lax
+- The session is held in HTTP-only `sb-access-token` / `sb-refresh-token` cookies (1h access + auto-refresh)
+- Role/chapter/region live in `auth.users.app_metadata` (service-role-only writeable) and are read by RLS via `auth.jwt() -> 'app_metadata' ->> 'user_role'`
 - CSRF protection on the OAuth flow via a state cookie
 - User chapter/region can only be changed by national admins via the user management page (after initial onboarding)
 
@@ -159,20 +174,19 @@ Authentication uses Wild Apricot OAuth 2.0 to identify users, then issues Fireba
 
 ```
 philippine-nurses-association-of-america/
-├── firebase.json              # Firebase project config
-├── firestore.rules            # Firestore security rules
-├── firestore.indexes.json     # Composite indexes
-├── storage.rules              # Firebase Storage rules
-├── functions/                 # Firebase Cloud Functions
-│   └── src/
-│       ├── index.ts           # Function exports + Admin SDK init
-│       ├── sync-members.ts    # HTTP endpoint for manual full member sync
-│       ├── sync-events.ts     # HTTP endpoint for manual full event sync
-│       ├── update-members.ts  # Scheduled daily status recalculation (2 AM ET)
-│       ├── webhook-handler.ts # Real-time Wild Apricot webhook receiver
-│       ├── create-user.ts     # Callable: admin user creation
-│       ├── wa-utils.ts        # Shared WA utilities (token, mapping, aggregation)
-│       └── run-sync.ts        # Local dev script for manual syncs
+├── supabase/                  # Supabase project (managed by Supabase CLI)
+│   ├── config.toml
+│   ├── migrations/            # Versioned SQL (schema, indexes, RLS, pg_cron)
+│   └── functions/             # Edge Functions (Deno)
+│       ├── _shared/           # WA + Supabase service client helpers
+│       ├── sync-events/       # Full event + attendee sync from Wild Apricot
+│       └── wild-apricot-webhook/  # Real-time WA webhook receiver
+├── scripts/                   # Node scripts run outside Supabase (CI / local)
+│   ├── package.json
+│   ├── wa-utils.ts            # Shared WA helpers
+│   └── sync-members.ts        # Nightly member sync (replaces the old Cloud Function)
+├── .github/workflows/
+│   └── sync-members.yml       # GitHub Actions cron → scripts/sync-members.ts
 └── pnaa/                      # Next.js application
     ├── middleware.ts           # Route protection (cookie existence check)
     ├── app/
@@ -181,15 +195,14 @@ philippine-nurses-association-of-america/
     │   ├── api/
     │   │   ├── auth/
     │   │   │   ├── signin/     # Start OAuth flow
-    │   │   │   ├── callback/   # Handle OAuth callback
-    │   │   │   ├── session/    # Create verified session cookie from ID token
+    │   │   │   ├── callback/   # Handle OAuth callback (mints the Supabase session)
     │   │   │   ├── setup/      # Save first-time chapter/region selection
     │   │   │   └── signout/    # Clear session cookie
     │   │   ├── sync/trigger/   # Manual sync trigger (national_admin only)
     │   │   └── users/[userId]/ # Update user role/chapter/region (national_admin only)
     │   ├── (auth)/
     │   │   ├── signin/         # Sign-in page
-    │   │   ├── callback/       # OAuth return → Firebase sign-in → session cookie
+    │   │   ├── callback/       # OAuth return — handled server-side now; this page just redirects
     │   │   └── setup/          # First-time onboarding: pick region & chapter
     │   └── (app)/              # Protected app routes (wrapped in OnboardingGuard)
     │       ├── layout.tsx      # App chrome (sidebar, header) + OnboardingGuard
@@ -217,13 +230,13 @@ philippine-nurses-association-of-america/
     │   ├── auth/               # OnboardingGuard
     │   ├── layout/             # Header, Sidebar, MobileNav
     │   ├── dashboard/          # Stats cards, chapter list widget, fundraising progress, upcoming events
-    │   ├── events/             # Event list/card/form/detail, attendee list (paginated WA + manual), metrics & attendance charts
-    │   ├── chapters/           # Chapter list/card/detail, aliases manager, activity chart
-    │   ├── members/            # Paginated member list, per-member detail with hours rollup
-    │   ├── fundraising/        # Campaign list/card/form/detail, fundraising chart
+    │   ├── events/             # Event list/card/form/detail, attendee list (paginated WA + manual), metrics & attendance charts, sub-event manager (national conferences)
+    │   ├── chapters/           # Chapter list/card/detail, aliases manager, activity chart, chapter-insights charts
+    │   ├── members/            # Paginated member list, per-member detail with hours rollup, member-insights charts (chapter-admin and above)
+    │   ├── fundraising/        # Campaign list/card/form/detail, fundraising chart, fundraising-insights charts
     │   ├── subchapters/        # Subchapter list/form/detail
     │   ├── users/              # User list with edit dialog
-    │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, DataTable, ViewToggle, FileUpload, EmptyState, StatusBadge
+    │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, DataTable, ViewToggle, EmptyState, StatusBadge
     ├── hooks/
     │   ├── use-auth.ts         # Auth helpers (role checks, chapter/region getters)
     │   ├── use-firestore.ts    # useDocument / useCollection (live listeners) + useDocumentOnce / useCollectionOnce (one-shot getDocs)
@@ -232,14 +245,15 @@ philippine-nurses-association-of-america/
     │   └── use-sidebar.ts
     ├── lib/
     │   ├── auth/
-    │   │   ├── context.tsx     # AuthProvider & useAuthContext
+    │   │   ├── context.tsx     # AuthProvider & useAuthContext (Supabase auth)
     │   │   └── guards.tsx      # RequireAuth / RequireRole components
-    │   ├── firebase/
-    │   │   ├── config.ts       # Client SDK init
-    │   │   ├── admin.ts        # Admin SDK (server-side, lazy Proxy pattern)
-    │   │   ├── firestore.ts    # Firestore helpers
+    │   ├── supabase/
+    │   │   ├── client.ts       # Browser Supabase client (createBrowserClient)
+    │   │   ├── server.ts       # Admin SDK (service role) + route-handler client
+    │   │   ├── firestore.ts    # Firestore-style query shim (where/orderBy/limit/getDoc/...)
+    │   │   ├── query.ts        # Query constraint translator
+    │   │   ├── timestamp.ts    # Firestore Timestamp shim + ISO ↔ Timestamp helpers
     │   │   ├── attendees.ts    # Attendance write helpers (toggle, hours edit, manual add/remove, defaultHours propagation)
-    │   │   ├── storage.ts      # Storage helpers
     │   │   └── index.ts
     │   ├── wild-apricot/
     │   │   └── oauth.ts        # OAuth + API utilities
@@ -261,116 +275,86 @@ philippine-nurses-association-of-america/
 ## Environment Variables
 
 Create a `.env.local` file inside `pnaa/` for **production**:
-A separate Firebase project is used for **staging** so you can test without touching production data. For more details, see [Staging Environment](#staging-environment)
+A separate Supabase project is used for **staging** so you can test without touching production data. For more details, see [Staging Environment](#staging-environment)
 
 
 ```env
-# Firebase (client-side — public)
-NEXT_PUBLIC_FIREBASE_API_KEY=
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
-NEXT_PUBLIC_FIREBASE_APP_ID=
+# Supabase (client-side — public)
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-# Firebase Admin (server-side — private)
-FIREBASE_ADMIN_PROJECT_ID=
-FIREBASE_ADMIN_CLIENT_EMAIL=
-FIREBASE_ADMIN_PRIVATE_KEY=
+# Supabase (server-side — private)
+SUPABASE_SERVICE_ROLE_KEY=   # secret key (sb_secret_...) or legacy service_role JWT
 
-# Wild Apricot OAuth
+# Wild Apricot OAuth (used by /api/auth/signin and /api/auth/callback)
 WILD_APRICOT_CLIENT_ID=
 WILD_APRICOT_CLIENT_SECRET=
 WILD_APRICOT_ACCOUNT_ID=
 WILD_APRICOT_DOMAIN=
+
+# Used by the sync trigger API route to authenticate Edge Function calls
+WEBHOOK_SECRET=
 ```
 
-Firebase Admin credentials are required for the OAuth callback route (issues custom tokens) and the session route (creates/verifies session cookies). Obtain them from a Firebase service account JSON file.
-
-Cloud Functions use separate environment variables configured in `functions/.env`:
+Edge Functions and the sync-members script read environment variables from the Supabase project's function-secrets and from GitHub Actions secrets respectively. Use the Supabase dashboard (Settings → Edge Functions → Secrets) and the GitHub repo settings (Settings → Secrets and variables → Actions):
 
 ```env
+# Required in Supabase Edge Functions
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
 WILD_APRICOT_API_KEY=
 WILD_APRICOT_ACCOUNT_ID=
-WEBHOOK_SECRET=          # For webhook endpoint authentication
+WEBHOOK_SECRET=
+
+# Required in GitHub Actions (Settings → Secrets → Actions)
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+WILD_APRICOT_API_KEY=
+WILD_APRICOT_ACCOUNT_ID=
 ```
 
 ---
 
 ## Staging environment
 
-A separate Firebase project is used for **staging** so you can test without touching production data.
+A separate Supabase project is used for **staging** so you can test without touching production data.
 
-- **Production Firebase project ID**: `pnaa-chapter-management`
-- **Staging Firebase project ID**: `pnaa-chaptermanagement-staging`
-
-### Firebase project aliases
-
-The repo uses Firebase CLI aliases defined in `.firebaserc`:
-
-```json
-{
-  "projects": {
-    "default": "pnaa-chapter-management",
-    "staging": "pnaa-chaptermanagement-staging"
-  }
-}
-```
-
-From the repo root:
-
-```bash
-# Use production for deploys
-firebase use default
-
-# Use staging for deploys
-firebase use staging
-```
-
-On the free plan, **only Firestore** is deployed to staging as of now:
-
-- `firebase deploy --only firestore` works for both prod and staging.
-- `firebase deploy --only functions` and `--only storage` require the Blaze plan on the target project, so Functions and Storage are **not deployed** to staging as of now.
+- **Production Supabase project**: `pnaa-prod` (URL + keys in `.env.local`)
+- **Staging Supabase project**: `pnaa-staging` (URL + keys in `.env.staging.local`)
 
 ### App environments (Next.js)
 
 Inside `pnaa/`:
 
-- `.env.local` → points to **production** Firebase.
-- `.env.staging.local` → points to **staging** Firebase (`pnaa-chaptermanagement-staging`).
+- `.env.local` → points to **production** Supabase.
+- `.env.staging.local` → points to **staging** Supabase.
 
-Typical workflows:
+```bash
+cd pnaa
 
-- **Run app against production** (local):
+# Production (default)
+npm run dev
 
-  - Ensure `.env.local` has production values.
-  - Run:
+# Staging (uses env-cmd to load .env.staging.local)
+npm run dev:staging
+```
 
-    ```bash
-    cd pnaa
-    npm run dev
-    ```
+### Deploying schema and Edge Functions
 
-- **Run app against staging** (local):
+The Supabase CLI manages both projects via the `--linked` flag (run `supabase link` once per environment):
 
-  - Ensure `.env.staging.local` exists with staging values.
-  - Either temporarily copy it over:
+```bash
+# Apply pending SQL migrations
+supabase db push
 
-    ```bash
-    cd pnaa
-    cp .env.staging.local .env.local
-    npm run dev
-    ```
+# Deploy Edge Functions
+supabase functions deploy sync-events
+supabase functions deploy wild-apricot-webhook
 
-  - Or, if using `env-cmd`, run the dedicated staging script:
-
-    ```bash
-    cd pnaa
-    npm run dev:staging
-    ```
-
-When the app is using staging, all Firestore/Auth operations go to the **staging** Firebase project; production continues to use its own env and project.
+# Regenerate TypeScript types from the live schema
+npm run supabase:types   # inside pnaa/
+```
 
 ---
 
@@ -378,8 +362,9 @@ When the app is using staging, all Firestore/Auth operations go to the **staging
 
 ### Prerequisites
 - Node.js 20+
-- Firebase CLI (`npm install -g firebase-tools`)
-- A Firebase project with Firestore, Auth, Storage, and Functions enabled
+- Supabase CLI (`brew install supabase/tap/supabase` or `npm i -g supabase`)
+- Deno (only if you want to run Edge Functions locally — `supabase functions serve` handles this)
+- Two Supabase projects (prod + staging) with Auth, Database, Edge Functions, Realtime, and pg_cron enabled
 - A Wild Apricot account with API/OAuth credentials
 
 ### Install & Run
@@ -395,57 +380,39 @@ npm run dev
 
 The app will be available at `http://localhost:3000`.
 
-```bash
-# Install Cloud Functions dependencies
-cd functions
-npm install
-
-# Build functions
-npm run build
-
-# Run functions locally with Firebase emulator
-npm run serve
-```
-
 ### Manual Sync (Local Dev)
 
-From the `functions/` directory:
+From the `scripts/` directory:
 
 ```bash
-npm run sync                              # sync members + events
-npm run sync:members                      # members only
-npm run sync:events                       # events only
-npm run sync:members -- --from 5000       # start at contact #5000
-npm run sync:members -- --limit 1000      # first 1000 contacts only
-npm run backfill:events                   # one-time stamp of eventType/subtype/defaultHours
-                                          #   and attendee source/attended/hours/memberId.
-                                          #   Idempotent — safe to re-run.
+npm install                              # one-time
+npm run sync-members                     # full member sync into Supabase
 ```
+
+The scheduled run lives in [.github/workflows/sync-members.yml](.github/workflows/sync-members.yml) — trigger an ad-hoc run from the Actions tab via `workflow_dispatch`.
 
 ### Deploy
 
 ```bash
-# Deploy Firestore rules and indexes
-firebase deploy --only firestore
+# Apply DB schema / RLS / index / pg_cron migrations
+supabase db push
 
-# Deploy Storage rules
-firebase deploy --only storage
-
-# Deploy Cloud Functions
-firebase deploy --only functions
+# Deploy Edge Functions
+supabase functions deploy sync-events
+supabase functions deploy wild-apricot-webhook
 ```
 
 ---
 
-## Firebase Cloud Functions
+## Supabase Edge Functions & Sync Jobs
 
-| Function | Trigger | Description |
+| Job | Trigger | Description |
 |---|---|---|
-| `syncMembers` | HTTP (POST, manual) | Full member sync: fetches all contacts from Wild Apricot via async job polling, then **diffs against existing Firestore docs and only writes rows where a tracked field changed** (name, email, level, renewal, chapter, education, member ID, region, status). Skipped writes are logged. Rebuilds chapter aggregates from the in-memory contact list. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 720s. |
-| `syncEvents` | HTTP (POST, manual) | Full event sync: fetches all events from Wild Apricot. Event docs are **insert-only** — existing event app fields are never overwritten. Then for every event, diffs the `attendees` subcollection against WA registrations using `set(..., { merge: true })` so admin-managed fields (`attended`, `hours`, `source`, `memberId`) are preserved across syncs. Refreshes `attendees`, `registrations`, `incompleteRegistrations`, `totalRevenue`, and adjusts `attendedCount` / `contactHours` deltas when an attended record is removed by WA. App-source attendees are never deleted by the sync. Secured with `?key=[WEBHOOK_SECRET]`. Timeout: 300s. |
-| `updateMembers` | Scheduled (daily, 2 AM ET) | Queries only `Active` members whose `renewalDueDate` has passed and flips them to `Lapsed`. Updates chapter aggregates via `FieldValue.increment` — no full member re-read required. |
-| `wildApricotWebhook` | HTTP (POST) | Real-time webhook receiver for Wild Apricot contact, membership, event, and event-registration changes. Contact/membership changes upsert the member and update chapter aggregates via increments (old/new delta). Event changes: Created = insert-only with `eventType: "conference"` / `eventSubtype: "in_person"` defaults, Changed = updates WA-owned fields only, Deleted = soft-delete (`archived: true`). EventRegistration changes write the matching `events/{eventId}/attendees/{registrationId}` doc — inserts seed `source: "wildapricot"`, `attended: false`, `hours: 0`, `memberId: contactId`; updates use merge-write to preserve app-managed fields; deletes decrement the parent event's `attendedCount` / `contactHours` if the removed attendee had been marked attended. Always returns 200 to prevent WA retry loops. |
-| `createUser` | Callable | Creates a Firebase Auth user and Firestore user document with role/chapter/region. Restricted to `national_admin` callers. |
+| `sync-events` Edge Function | HTTP (POST, manual) | Full event sync. Insert-only for new events (never overwrites app fields); for every event, diffs WA registrations against the `attendees` table preserving `attended`/`hours` on existing rows. Refreshes `registrations`, `attendees`, `incompleteRegistrations`, `totalRevenue`. Secured with `?key=<WEBHOOK_SECRET>`. |
+| `wild-apricot-webhook` Edge Function | HTTP (POST) | Real-time WA event receiver for Contact / Membership / MembershipRenewed / Event / EventRegistration. Upserts members + chapter aggregates, inserts new events (insert-only), syncs attendee rows preserving admin fields. Out-of-order registrations are queued in `pending_registrations`. Always returns 200. |
+| `scripts/sync-members.ts` (GitHub Actions) | Cron (nightly 02:00 ET) + manual `workflow_dispatch` | Full member sync from WA. Runs in GitHub Actions because WA's contact-job poll can take 5–8 minutes (above the Edge Functions 400s ceiling). Diff-aware upsert — only rows whose tracked fields changed are written. Rebuilds chapter aggregates from the WA snapshot. |
+| `public.update_member_status()` (pg_cron) | Daily 02:00 ET | SQL function that flips `activeStatus` based on `renewalDueDate` and rebuilds chapter aggregate counts in a single transaction. |
+| `POST /api/users` (Next.js route) | Authenticated (`national_admin`) | Creates an `auth.users` row + `public.users` profile + sets app_metadata claims. Replaces the old `createUser` callable Cloud Function. |
 
 ### Webhook Configuration
 
@@ -453,19 +420,20 @@ Configure in Wild Apricot (Apps > Integrations > Webhooks):
 
 | Setting | Value |
 |---|---|
-| URL | `https://[region]-[project].cloudfunctions.net/wildApricotWebhook?key=[WEBHOOK_SECRET]` |
+| URL | `https://<project>.supabase.co/functions/v1/wild-apricot-webhook?key=<WEBHOOK_SECRET>` |
 | Authorization | Secret token (query param) |
 | Token name | `key` |
-| Token value | Value of `WEBHOOK_SECRET` from `functions/.env` |
+| Token value | Value of `WEBHOOK_SECRET` (set as a Supabase Edge Function secret) |
 | Notification types | Contact, Membership, MembershipRenewed, Event, EventRegistration |
 
 ### Data Sync Strategy
 
-- **Real-time**: The webhook handler processes individual contact/event/registration changes as they happen in Wild Apricot. Chapter aggregates are updated via `FieldValue.increment` using the old/new member delta — no member re-reads required.
-- **Manual full sync**: `syncMembers` and `syncEvents` are HTTP endpoints (no schedule). Trigger them via `POST /syncMembers?key=[WEBHOOK_SECRET]` and `POST /syncEvents?key=[WEBHOOK_SECRET]` when a full re-sync is needed (e.g. after a gap in webhook coverage or initial setup). `syncMembers` reads existing docs once, then only writes rows that actually changed — at 14k members this typically writes a few hundred docs rather than 14k.
-- **Daily status update**: `updateMembers` runs at 2 AM ET, querying only `Active` members with an expired `renewalDueDate`. On a typical day this touches tens to a few hundred documents rather than the full membership, and updates chapter counts via increments. **This is the only scheduled function.**
-- **Chapter aggregates**: The webhook and `updateMembers` use incremental updates. `syncMembers` rebuilds aggregates from scratch from the in-memory contact list during a full sync. `recalculateChapterAggregates` in `wa-utils.ts` is available as a manual recovery utility if counts drift.
-- **Backfill**: `npm run backfill:events` (in `functions/`) idempotently stamps `eventType` / `eventSubtype` / `defaultHours` / `attendedCount` on existing event docs and `source` / `attended` / `hours` / `memberId` on existing attendee subdocs. Run once after deploying the type/subtype change.
+- **Real-time**: `wild-apricot-webhook` processes contact/event/registration changes as they happen. Chapter aggregates are recalculated for the impacted chapters only.
+- **Manual full sync**:
+  - **Members** → trigger the GitHub Actions workflow `sync-members.yml` (`workflow_dispatch` in the Actions tab) or run `npm run sync-members` from `scripts/` locally with `.env` populated.
+  - **Events** → POST to the Edge Function: `curl -X POST "https://<project>.supabase.co/functions/v1/sync-events?key=<WEBHOOK_SECRET>"`, or use the in-app trigger at `POST /api/sync/trigger { "type": "events" }` (national-admin only).
+- **Daily status update**: The pg_cron job `update_member_status()` runs at 02:00 ET; flips status based on renewal date and rebuilds chapter counts. View / pause via the Supabase dashboard or `select cron.job, cron.run_jobname()` queries.
+- **Chapter aggregates**: Maintained in three places: the webhook handler recalcs the impacted chapter(s) per event, `sync-members.ts` rebuilds the full set, and the pg_cron job rebuilds nightly from current member rows.
 
 ---
 
@@ -478,13 +446,13 @@ Configure in Wild Apricot (Apps > Integrations > Webhooks):
 | `chapter_admin` | Read access to all data; can create/edit events and fundraising for their chapter |
 | `member` | Read-only access to events, chapters, fundraising, and their own user profile |
 
-Roles are stored as Firebase Auth custom claims and mirrored in Firestore `/users/{uid}`. Firestore security rules enforce permissions server-side via `getUserRole()` which reads from the Firestore user document.
+Roles live in `auth.users.app_metadata.user_role` and are mirrored in `public.users.role`. RLS policies enforce permissions server-side via `public.auth_role()` which reads `auth.jwt() -> 'app_metadata' ->> 'user_role'`.
 
-Soft deletes are used for events, fundraising, and subchapters (no hard deletes allowed via security rules — records are archived with `archived: true`).
+Soft deletes are used for events, fundraising, and subchapters (no hard deletes allowed via RLS — records are archived with `archived: true`).
 
-Members and chapters are **read-only** from the client — only Cloud Functions write to these collections.
+Members and chapters are **read-only** from the client — only the service-role client (Edge Functions, the sync-members script, Next.js API routes) writes to these tables.
 
-The `events/{eventId}/attendees` subcollection is **writeable by admins** so they can mark attendance, edit per-attendee hours, and add/remove manual attendees. Cloud Functions still own all WA-sourced field updates, and use `set(..., { merge: true })` to preserve admin-managed fields.
+The `attendees` table is **writeable by admins** (RLS) so they can mark attendance, edit per-attendee hours, and add/remove manual rows. Service-role writes from the Edge Functions still own all WA-sourced field updates and use `upsert(..., { onConflict: 'id' })` while preserving the admin-managed `attended` / `hours` fields.
 
 ### Revenue & payment visibility
 
@@ -496,7 +464,7 @@ Per client requirements, all monetary values associated with events are **gated 
 | Events table ([event-list.tsx](pnaa/components/events/event-list.tsx)) | `totalRevenue` column (and its CSV/XLSX export) | Hidden |
 | Attendee list ([attendee-list.tsx](pnaa/components/events/attendee-list.tsx)) | `paidSum`, `registrationFee` dollar amounts | Hidden — payment column still shows Free / Paid in Full / Unpaid status |
 
-Note: this gating is **UI-only**. The underlying fields remain readable from Firestore by any authenticated user under current security rules. Tighten the rules if server-side enforcement is needed.
+Note: this gating is **UI-only**. The underlying columns remain readable by any authenticated user under current RLS policies. Tighten the policies (or move revenue/payment fields to a `national_admin`-restricted view) if server-side enforcement is needed.
 
 ---
 
@@ -506,54 +474,85 @@ Every event has a **type** and **subtype**. The type drives how attendee hours a
 
 | Type | Subtypes | Hours behavior |
 |---|---|---|
-| **Conference** | In Person, Webinar | All attendees marked attended earn the event's `defaultHours`. Editing `defaultHours` propagates live to every attended attendee (see [propagateConferenceDefaultHours](pnaa/lib/firebase/attendees.ts)). |
+| **Conference** | In Person, Webinar | All attendees marked attended earn the event's `defaultHours`. Editing `defaultHours` propagates live to every attended attendee (see [propagateConferenceDefaultHours](pnaa/lib/supabase/attendees.ts)). |
 | **Community Outreach** | Medical Mission, Health Screening, Volunteerism | `defaultHours` autofills the field when an attendee is added or marked attended, but admins can override hours per-person. |
 
 Wild Apricot–synced events default to `eventType: "conference"`, `eventSubtype: "in_person"`, `defaultHours: 0`. Admins can change these on the edit form; the subtype dropdown filters its options based on the chosen type.
 
+### National-Conference Sub-Events
+
+Events on the `national` chapter with `eventType: "conference"` gain a third hours mode: an ordered list of **sub-events** (e.g. "Opening Keynote", "Breakout A") drawn from a shared, case-insensitive catalog (`public.subevents`). Attendance is tracked per `(attendee, sub-event)` cell rather than per event, and hours roll up as `cardinality(attendedSubeventIds) * defaultHours`. An attendee's `attended` flag flips true as soon as they're marked for at least one sub-event.
+
+- `events.subeventIds uuid[]` — the event's ordered sub-event list
+- `attendees.attendedSubeventIds uuid[]` — which sub-events that attendee was marked for
+- A `BEFORE` trigger keeps `attendees.hours` / `attended` aligned with the array, but **only** for `national` conferences — every other event keeps the existing conference / community-outreach behavior untouched.
+- All mutations go through transactional RPCs so the attendee array and the event counters (`contactHours`, `attendedCount`) never drift: `set_subevent_attendance`, `bulk_set_subevent_attendance` (CSV import), `add_subevent_to_event` (find-or-create + unarchive), `remove_subevent_from_event`, and `reorder_event_subevents`. `propagate_conference_default_hours` is sub-event-aware: on `national` it rescales by array cardinality, elsewhere it flat-sets every attended row.
+
+Defined in [supabase/migrations/20260520000001_subevents.sql](supabase/migrations/20260520000001_subevents.sql); GIN indexes back the array membership lookups.
+
 ### Attendees: Wild Apricot vs Manual
 
-The `events/{eventId}/attendees` subcollection holds two kinds of records, distinguished by the `source` field:
+The `attendees` table holds two kinds of records, distinguished by the `source` column:
 
-- **`source: "wildapricot"`** — Synced from WA event registrations. Doc ID is the WA registration ID. WA-managed fields (`name`, `registrationType`, `Status`, `paidSum`, etc.) are kept fresh by `syncEvents` and the webhook. App-managed fields (`attended`, `hours`) are preserved across syncs via `set(..., { merge: true })`.
-- **`source: "app"`** — Added by an admin from the event detail page. Doc ID is `app-{memberId}` so the same member can't be added twice. Always `attended: true` on creation. Linked to a `members/{memberId}` doc via `memberId`.
+- **`source: "wildapricot"`** — Synced from WA event registrations. Primary key is the WA registration ID. WA-managed fields (`name`, `registrationType`, `Status`, `paidSum`, etc.) are kept fresh by `sync-events` and the webhook. App-managed fields (`attended`, `hours`) are preserved across syncs by reading the existing row before upsert.
+- **`source: "app"`** — Added by an admin from the event detail page (or the bulk attendance upload). Primary key is `app-{eventId}-{memberId}` — scoped to the event so the same member can be added to multiple events without a primary-key collision, while a per-`(eventId, memberId)` check still prevents adding them twice to the *same* event. Always `attended: true` on creation (manual add). Linked to a `public.members` row via `memberId`.
 
-The Add Attendee dialog requires the admin to pick from existing members (server-side prefix search, ≥ 2 chars, scoped to active members and optionally to the event's chapter). It refuses to add a member who is already on the event in either section.
+The Add Attendee dialog requires the admin to pick from existing members (server-side `ILIKE` substring search, scoped to active members and optionally to the event's chapter). It refuses to add a member who is already on the event in either section.
 
 ### Per-Member Hours Rollup
 
-The `/members/[memberId]` page queries `collectionGroup("attendees")` filtered by `memberId == X && attended == true`, then fetches each unique parent event doc to display:
+The `/members/[memberId]` page queries `attendees` filtered by `memberId == X && attended == true`, then fetches each referenced event row to display:
 
 - Total hours, total events attended
 - Conference hours vs. community outreach hours
 - A table of every event the member attended, with date / type / chapter / hours
 
-Powered by the `(memberId, attended)` collection-group index in [firestore.indexes.json](firestore.indexes.json).
+Powered by the `(memberId, attended)` composite index defined in [supabase/migrations/20260515000002_indexes.sql](supabase/migrations/20260515000002_indexes.sql).
+
+---
+
+## Bulk CSV Upload
+
+Admins can upload a CSV instead of entering records one at a time. All importers share one framework — a generic dialog shell plus a small per-feature **adapter** — so they parse and resolve conflicts the same way.
+
+- **Shared parsing**: [pnaa/lib/csv.ts](pnaa/lib/csv.ts) — a dependency-free RFC-4180-ish `parseCSV`, plus `parseBoolean`, `downloadCsv`, `splitHeader`, and a header-name column accessor (so column order doesn't matter).
+- **Shared shell**: [pnaa/components/shared/bulk-upload-dialog.tsx](pnaa/components/shared/bulk-upload-dialog.tsx) — `BulkUploadDialog` + `BulkUploadButton`, driven by a `BulkUploadAdapter<Row>` (`analyze`, `status`, `renderRow`, `apply`, optional `prepare`). The shell owns the dropzone, template download, summary badges (ready / needs-resolution / skipped), the row list, and apply + toasts.
+
+| Importer | CSV columns | Matching / resolution | Apply path |
+|---|---|---|---|
+| **Event attendance** ([bulk-attendance-csv.tsx](pnaa/components/events/bulk-attendance-csv.tsx)) | Name, Email, Attended, Hours | Match by **email → member → memberId**, then existing-attendee name, then a members-by-name lookup. Conflicts: ambiguous name (pick), lapsed member (confirm-add), no match. | One transactional RPC `bulk_set_attendance` — inserts missing app attendees, updates WA rows in place (matched by `memberId`, never duplicated), recomputes counters. |
+| **Fundraising campaigns** ([bulk-campaign-upload.tsx](pnaa/components/fundraising/bulk-campaign-upload.tsx)) | Fundraiser Name, Chapter, Date, Amount, Note | Resolve chapter by name (unknown → pick from a dropdown); validate date / amount. | Client-side `addDocument` loop, partial-failure tolerant ("Created X of Y"). |
+| **Event creation** ([bulk-event-upload.tsx](pnaa/components/events/bulk-event-upload.tsx)) | Name, Start/End Date, Chapter, Event Type, Subtype, Default Hours, Location | Resolve chapter by name; validate type; snap an invalid subtype to a default with a warning. Creates `source: "app"` events. | Client-side `addDocument` loop, partial-failure tolerant. |
+| **Sub-event attendance** ([bulk-attendance-upload.tsx](pnaa/components/events/bulk-attendance-upload.tsx)) | Name, Sub-Event, Attended | National-conference only. Resolves attendees + sub-event names; can create a missing sub-event inline. | RPC `bulk_set_subevent_attendance`. |
+
+The sub-event importer predates the shared shell and keeps its own (more intricate) resolution flow; it only shares `lib/csv.ts`. **No dedupe** on the fundraising/event importers — re-uploading the same file creates duplicate rows (the dialog warns of this); the attendance importer is idempotent (matched by `memberId` + counter recompute).
 
 ---
 
 ## Read/Write Optimization
 
-At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, so the app is deliberately conservative about reads. Strategies in use:
+Postgres is cheaper per read than Firestore, but Supabase Realtime has its own cost shape (channels and replication messages), so the same conservatism applies. Strategies in use:
 
 | Technique | Where | Impact |
 |---|---|---|
-| **Server-side cursor pagination** | `/members` listing, event attendee list (WA section) | A `/members` visit reads ~50 docs instead of 14k. A 2000-attendee conference detail page reads ~50 instead of 2000. |
-| **Server-side prefix search** (min 2 chars) | `/members` search bar, AddManualAttendeeDialog member picker | Searches read ≤ 25–50 matching docs, never the full collection. Uses composite indexes on `(activeStatus, name)` and `(activeStatus, chapterName, name)`. |
+| **Server-side cursor pagination** | `/members` listing, event attendee list (WA section) | A `/members` visit reads ~50 rows instead of 14k. A 2000-attendee conference detail page reads ~50 instead of 2000. |
+| **Server-side `ILIKE` substring search** | `/members` search bar, AddManualAttendeeDialog member picker | Case-insensitive substring matching with no minimum-length gate. Active-only paths use the `(activeStatus, name)` and `(activeStatus, chapterId, name)` indexes. |
 | **Lazy-mount dialogs** | `AddManualAttendeeDialog` body | Prevents the dialog's member-search hook from running on every event-detail page load. The hook only fires after the admin opens the dialog. |
-| **One-shot `getDocs`** instead of `onSnapshot` | `/members` lists, chapter list / detail (members + aliases), member detail page | Slow-changing collections don't need live listeners. Saved listener overhead and removed redundant snapshot deliveries. Implemented via `useCollectionOnce` / `useDocumentOnce` in [hooks/use-firestore.ts](pnaa/hooks/use-firestore.ts). |
-| **Optimistic local updates** | Attendee list (toggle attended, edit hours, add/remove manual) | Admin actions update local state immediately; Firestore write happens in the background with rollback on failure. No re-fetch needed after the write. |
-| **Diff-write `syncMembers`** | `functions/src/sync-members.ts` | Reads existing member docs once, then only writes rows whose tracked fields actually changed. At 14k members a full sync typically writes 50–500 docs instead of 14k. |
+| **One-shot select** instead of Realtime channel | `/members` lists, chapter list / detail (members + aliases), member detail page | Slow-changing tables don't need live listeners. Saves channel overhead. Implemented via `useCollectionOnce` / `useDocumentOnce` in [hooks/use-firestore.ts](pnaa/hooks/use-firestore.ts). |
+| **Optimistic local updates** | Attendee list (toggle attended, edit hours, add/remove manual) | Admin actions update local state immediately; Postgres write happens in the background with rollback on failure. No re-fetch needed after the write. |
+| **Diff-write `sync-members`** | `scripts/sync-members.ts` | Reads existing member rows once, then only upserts rows whose tracked fields actually changed. At 14k members a full sync typically writes 50–500 rows instead of 14k. |
 | **Active-only filter default** | `/members` listing, member picker | Reduces working set from ~14k to active members (~9–10k typically). |
+| **Transactional RPCs** | Attendee/event writes, sub-event attendance, bulk attendance import | Multi-statement writes (attendee row + event counters) collapse into one `SECURITY INVOKER` call so counters never drift and RLS still applies. See [20260516000001_rpcs.sql](supabase/migrations/20260516000001_rpcs.sql), [20260520000001_subevents.sql](supabase/migrations/20260520000001_subevents.sql), and [20260602000002_bulk_attendance.sql](supabase/migrations/20260602000002_bulk_attendance.sql) (`bulk_set_attendance`). |
+| **Single-roundtrip aggregates** | `/members` insights, chapter/fundraising insights | `member_insights()` computes region/level/education/renewal-cliff rollups server-side and returns one JSON blob instead of streaming ~14k rows for client-side chart math. |
 
 ### Live listeners are kept where freshness matters
 
-- **Event detail / attendee state during admin editing** — uses `getDocs` + optimistic local state (admin needs immediate feedback on their own action).
-- **Dashboard widgets** — live listeners on small aggregate docs (chapters, etc.).
+- **Event detail / attendee state during admin editing** — uses one-shot select + optimistic local state (admin needs immediate feedback on their own action).
+- **Dashboard widgets** — Realtime channels on small aggregate tables (chapters, etc.).
 
 ### What's not optimized yet
 
-- Full-text search across members ("smith" finding "John Smith") still requires an external index (Algolia / Typesense). Today only **case-corrected name prefix** searches work.
+- Full-text search across members ("smith" finding "John Smith") could move to Postgres `tsvector` / `pg_trgm` but isn't yet — today only **case-corrected name prefix** searches work.
 - The `/events` listing fetches up to 500 events per visit (capped); not paginated. Acceptable at current event volume but a future concern.
 
 ---
@@ -566,11 +565,11 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
   name: string
   email: string
   membershipLevel: string
-  renewalDueDate: string
-  chapterName: string
+  renewalDueDate: string         // text — WA sends ISO 8601 strings, not timestamptz
+  chapterId: string | null       // FK → chapters.id; resolved from WA name via ChapterResolver
   highestEducation: string
   memberId: string               // From WA custom field, fallback: WA contact ID
-  region: string
+  region: string                 // PNAA Region — independent of the chapter's region
   activeStatus: "Active" | "Lapsed"
   lastSynced: Timestamp
 }
@@ -581,13 +580,12 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
 {
   id: string
   name: string
-  startDate: string
-  endDate: string
+  startDate: string              // text (WA ISO string)
+  endDate: string                // text
   startTime: string
   endTime: string
   location: string
-  chapter: string
-  region: string
+  chapterId: string | null       // FK → chapters.id; WA-imported / cross-chapter events default to the seeded 'national' chapter
   about: string
   archived: boolean
 
@@ -598,7 +596,7 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
     | "medical_mission" | "health_screening" | "volunteerism" // Community Outreach
   defaultHours: number      // Per-attendee hours value (uniform for conference, prefill for outreach)
 
-  // Metrics — denormalized; maintained by Cloud Functions and the attendee write helpers
+  // Metrics — denormalized; maintained by the Edge Functions (sync-events / webhook) and the attendee write helpers
   attendees: number               // WA registration count (legacy name; same as `registrations`)
   registrations: number           // WA registration count
   incompleteRegistrations: number // Registrations not yet Paid/Free
@@ -612,7 +610,9 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
   // Optional subchapter association
   subchapterId?: string
 
-  eventPoster: { name: string; ref: string; downloadURL: string }
+  // Ordered sub-event list (national conferences only — see "National-Conference Sub-Events")
+  subeventIds: string[]
+
   source: "wildapricot" | "app"
   lastUpdatedUser: string
   lastUpdated: Timestamp
@@ -620,10 +620,11 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
 }
 ```
 
-### Attendee (subcollection: `events/{eventId}/attendees/{attendeeId}`)
+### Attendee (table: `public.attendees`, FK → `events.id`)
 ```typescript
 {
-  // Doc ID is `registrationId` for WA records, `app-{memberId}` for manual records.
+  // Primary key is `registrationId` for WA records, `app-{eventId}-{memberId}` for app/manual records.
+  id: string
   registrationId: string
   eventId: string
   contactId: string
@@ -632,6 +633,7 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
   // App-managed (admins toggle these from the event detail page)
   attended: boolean
   hours: number
+  attendedSubeventIds: string[] // Sub-events this attendee was marked for (national conferences); drives hours/attended via trigger
   source: "wildapricot" | "app"
   memberId: string          // Always set; mirrors contactId for WA, the picked member for app records
 
@@ -651,9 +653,9 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
 ```typescript
 {
   fundraiserName: string
-  chapterName: string
+  chapterId: string | null       // FK → chapters.id; null for national campaigns
   subchapterId?: string
-  date: string
+  date: string                   // text (ISO 8601)
   amount: number
   note: string
   archived: boolean
@@ -666,9 +668,10 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
 ### Chapter
 ```typescript
 {
-  name: string
-  region: string
-  totalMembers: number
+  id: string                     // canonical slug, e.g. "pna-metro-houston"
+  name: string                   // display name
+  region: string                 // source of truth for chapter's region
+  totalMembers: number           // aggregate; rebuilt by sync-members and pg_cron
   totalActive: number
   totalLapsed: number
   lastUpdated: Timestamp
@@ -679,25 +682,24 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
 ```typescript
 {
   name: string
-  chapterId: string
-  chapterName: string
-  region: string
+  chapterId: string              // FK → chapters.id; required
   description: string
   memberIds: string[]
   archived: boolean
-  createdBy: string
+  createdBy: string              // uuid (auth.users.id)
   lastUpdatedUser: string
   createdAt: Timestamp
   lastUpdated: Timestamp
 }
 ```
+> No `chapterName` or `region` columns — both derive via join on `chapterId`.
 
 ### Chapter Alias
 ```typescript
 {
-  id?: string                // Firestore doc id
+  id?: string                // uuid
   aliasName: string          // Alternative WA chapter name
-  chapterId: string          // Canonical chapter, maps to chapters/{chapterId}
+  chapterId: string          // Canonical chapter, FK → chapters.id
   createdBy: string
   createdAt?: Timestamp
   lastUpdated?: Timestamp
@@ -707,12 +709,13 @@ At 14k members the daily Firestore free tier (50k reads / 20k writes) is tight, 
 ### User
 ```typescript
 {
+  id: string                     // uuid, references auth.users.id
   email: string
   displayName: string
   role: "national_admin" | "region_admin" | "chapter_admin" | "member"
-  chapterName?: string
-  region?: string
-  needsOnboarding?: boolean  // true for new users until they complete /setup
+  chapterId?: string | null      // FK → chapters.id; set on /setup for chapter_admin / member
+  region?: string                // used to scope region_admin views
+  needsOnboarding?: boolean      // true for new users until they complete /setup
   waContactId?: string
   createdAt: Timestamp
   lastLogin: Timestamp

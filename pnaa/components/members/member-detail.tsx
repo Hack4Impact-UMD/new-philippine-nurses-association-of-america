@@ -5,14 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   collectionGroup,
-  doc,
-  getDoc,
   onSnapshot,
   query,
   where,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+} from "@/lib/supabase/firestore";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { hydrateTimestamps } from "@/lib/supabase/timestamp";
 import { useDocumentOnce } from "@/hooks/use-firestore";
+import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +47,7 @@ interface AttendedEventRow {
 
 export function MemberDetail({ memberId }: { memberId: string }) {
   const router = useRouter();
+  const { nameFor, regionFor } = useChaptersMap();
   const { data: member, loading: memberLoading } = useDocumentOnce<Member>(
     "members",
     memberId
@@ -64,7 +65,7 @@ export function MemberDetail({ memberId }: { memberId: string }) {
   useEffect(() => {
     setAttendanceLoading(true);
     const q = query(
-      collectionGroup(db, "attendees"),
+      collectionGroup("attendees"),
       where("memberId", "==", memberId),
       where("attended", "==", true)
     );
@@ -78,23 +79,25 @@ export function MemberDetail({ memberId }: { memberId: string }) {
         }));
         setAttendances(rows);
 
-        // Fetch any event docs we don't already have cached.
+        // Fetch any event docs we don't already have cached. One round-trip
+        // (`select … where id in (…)`) instead of N parallel single-row reads.
         const needed = new Set(rows.map((r) => r.eventId));
         const fetched = new Map(eventsById);
         const missing = [...needed].filter((id) => !fetched.has(id));
         if (missing.length > 0) {
-          const docs = await Promise.all(
-            missing.map((id) => getDoc(doc(db, "events", id)))
-          );
-          for (const d of docs) {
-            if (d.exists()) {
-              fetched.set(d.id, {
-                ...(d.data() as AppEvent),
-                id: d.id,
-              });
+          const { data: eventRows, error: evErr } = await getSupabaseBrowser()
+            .from("events")
+            .select("*")
+            .in("id", missing);
+          if (!evErr) {
+            for (const row of eventRows ?? []) {
+              const hydrated = hydrateTimestamps(
+                row as Record<string, unknown>
+              ) as unknown as AppEvent & { id: string };
+              fetched.set(hydrated.id, hydrated);
             }
+            setEventsById(fetched);
           }
-          setEventsById(fetched);
         }
         setAttendanceLoading(false);
       },
@@ -114,8 +117,8 @@ export function MemberDetail({ memberId }: { memberId: string }) {
           eventId: a.eventId,
           eventName: ev.name,
           startDate: ev.startDate,
-          chapter: ev.chapter,
-          region: ev.region,
+          chapter: nameFor(ev.chapterId),
+          region: regionFor(ev.chapterId),
           eventType: ev.eventType,
           eventSubtype: ev.eventSubtype,
           hours: Number(a.hours ?? 0),
@@ -124,7 +127,7 @@ export function MemberDetail({ memberId }: { memberId: string }) {
       })
       .filter((r): r is AttendedEventRow => r !== null)
       .sort((a, b) => (a.startDate > b.startDate ? -1 : 1));
-  }, [attendances, eventsById]);
+  }, [attendances, eventsById, nameFor, regionFor]);
 
   const stats = useMemo(() => {
     let totalHours = 0;
@@ -263,7 +266,7 @@ export function MemberDetail({ memberId }: { memberId: string }) {
             </div>
             <p className="text-muted-foreground text-sm">{member.email}</p>
             <p className="text-muted-foreground text-sm">
-              {member.chapterName || "No chapter"}
+              {nameFor(member.chapterId) || "No chapter"}
               {member.region ? ` · ${member.region}` : ""}
               {member.membershipLevel ? ` · ${member.membershipLevel}` : ""}
             </p>

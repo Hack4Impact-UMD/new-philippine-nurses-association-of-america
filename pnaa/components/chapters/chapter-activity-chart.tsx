@@ -13,21 +13,36 @@ interface Props {
 
 export function ChapterActivityChart({ chapters, loading }: Props) {
   const regions = useMemo(() => {
-    const set = new Set(chapters.map((c) => c.region).filter(Boolean));
+    const set = new Set(
+      chapters.filter((c) => c.id !== "national").map((c) => c.region).filter(Boolean)
+    );
     return ["All", ...Array.from(set).sort()];
   }, [chapters]);
 
   const [selectedRegion, setSelectedRegion] = useState("All");
 
-  const bars = useMemo(() => {
-    const filtered = selectedRegion === "All"
-      ? chapters
-      : chapters.filter((c) => c.region === selectedRegion);
+  // Exclude the seeded "national" catch-all chapter — it's a bucket for
+  // cross-chapter / WA-imported events, not a real chapter membership.
+  const realChapters = useMemo(
+    () => chapters.filter((c) => c.id !== "national"),
+    [chapters]
+  );
 
-    return [...filtered]
-      .sort((a, b) => b.totalActive - a.totalActive)
-      .slice(0, 20); // cap at 20 for readability
-  }, [chapters, selectedRegion]);
+  const filteredChapters = useMemo(
+    () =>
+      selectedRegion === "All"
+        ? realChapters
+        : realChapters.filter((c) => c.region === selectedRegion),
+    [realChapters, selectedRegion]
+  );
+
+  const bars = useMemo(
+    () =>
+      [...filteredChapters]
+        .sort((a, b) => b.totalActive - a.totalActive)
+        .slice(0, 20), // cap at 20 for readability
+    [filteredChapters]
+  );
 
   const max = Math.max(1, ...bars.map((c) => c.totalActive));
 
@@ -103,7 +118,7 @@ export function ChapterActivityChart({ chapters, loading }: Props) {
             </div>
           ))}
         </div>
-        {bars.length === 20 && chapters.filter(c => selectedRegion === "All" || c.region === selectedRegion).length > 20 && (
+        {bars.length === 20 && filteredChapters.length > 20 && (
           <p className="text-xs text-muted-foreground text-center mt-2">Showing top 20 chapters by active members</p>
         )}
       </CardContent>

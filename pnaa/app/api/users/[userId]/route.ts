@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { supabaseAdmin, getCaller } from "@/lib/supabase/server";
 import type { UserRole } from "@/types/user";
 
 const VALID_ROLES: UserRole[] = [
@@ -10,39 +9,23 @@ const VALID_ROLES: UserRole[] = [
   "member",
 ];
 
-async function getCallerUid(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("firebase_token")?.value;
-  if (!token) return null;
-  try {
-    const decoded = await adminAuth.verifySessionCookie(token);
-    return decoded.uid;
-  } catch {
-    return null;
-  }
-}
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ userId: string }> }
 ) {
-  const callerUid = await getCallerUid();
+  const { uid: callerUid, role: callerRole } = await getCaller();
   if (!callerUid) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  // Verify caller is national_admin via Firestore
-  const callerDoc = await adminDb.collection("users").doc(callerUid).get();
-  if (!callerDoc.exists || callerDoc.data()?.role !== "national_admin") {
+  if (callerRole !== "national_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { userId } = await params;
-
   const body = await request.json();
-  const { role, chapterName, region } = body as {
+  const { role, chapterId, region } = body as {
     role: UserRole;
-    chapterName?: string;
+    chapterId?: string;
     region?: string;
   };
 
@@ -51,17 +34,29 @@ export async function PATCH(
   }
 
   try {
-    await adminDb.collection("users").doc(userId).update({
-      role,
-      chapterName: chapterName || null,
-      region: region || null,
-    });
+    const admin = supabaseAdmin();
+    const { error: dbErr } = await admin
+      .from("users")
+      .update({
+        role,
+        chapterId: chapterId ?? null,
+        region: region ?? null,
+      })
+      .eq("id", userId);
+    if (dbErr) throw dbErr;
 
-    await adminAuth.setCustomUserClaims(userId, {
-      role,
-      chapterName: chapterName || null,
-      region: region || null,
+    // (#7) Merge into existing app_metadata so unrelated claims survive.
+    const { data: authUser } = await admin.auth.admin.getUserById(userId);
+    const prevMeta = (authUser?.user?.app_metadata ?? {}) as Record<string, unknown>;
+    const { error: claimsErr } = await admin.auth.admin.updateUserById(userId, {
+      app_metadata: {
+        ...prevMeta,
+        user_role: role,
+        chapter_id: chapterId ?? null,
+        region: region ?? null,
+      },
     });
+    if (claimsErr) throw claimsErr;
 
     return NextResponse.json({ success: true });
   } catch (error) {

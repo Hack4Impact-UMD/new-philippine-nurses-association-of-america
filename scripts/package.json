@@ -1,0 +1,21 @@
+{
+  "name": "pnaa-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-members": "tsx sync-members.ts",
+    "migrate": "tsx migrate.ts",
+    "migrate:dry-run": "tsx migrate.ts --dry-run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^13.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.35",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

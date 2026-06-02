@@ -1,8 +1,20 @@
-/node_modules
-/functions/node_modules
-pnaa-chapter-management-firebase-adminsdk-fbsvc-fc1a5f5216.json
-pnaa-chapter-management-firebase-adminsdk-fbsvc-ae69bf85fa.json
+node_modules
+pnaa/node_modules
+pnaa/.next
 pnaa/.env.local
 pnaa/.env
-functions/.env
-functions/.env.*
+pnaa/.env.staging.local
+
+# Supabase
+supabase/.temp
+supabase/.branches
+supabase/functions/.deno_cache
+
+# Scripts
+scripts/node_modules
+scripts/.env
+
+# Old Firebase artifacts (kept here so accidental re-creation is ignored)
+pnaa-chapter-management-firebase-adminsdk*.json
+firestore-debug.log
+firebase-debug.log
