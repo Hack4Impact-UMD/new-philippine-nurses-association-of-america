@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/chart";
 import { makeStackShape } from "@/components/shared/chart-shapes";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
-import { useAuth, useIsNationalAdmin } from "@/hooks/use-auth";
+import { useAuth, useIsAdmin } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
 
 interface RegionRow {
@@ -67,7 +67,7 @@ const PIE_PALETTE = [
 
 export function MemberInsights() {
   const { isLoading: authLoading } = useAuth();
-  const isNationalAdmin = useIsNationalAdmin();
+  const isAdmin = useIsAdmin();
   const [payload, setPayload] = useState<MemberInsightsPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -76,32 +76,38 @@ export function MemberInsights() {
     // log noise. Wait until auth resolves so we don't skip the call on first
     // render before the role lands.
     if (authLoading) return;
-    if (!isNationalAdmin) {
+    if (!isAdmin) {
       setLoading(false);
       return;
     }
     let cancelled = false;
     const supabase = getSupabaseBrowser();
-    supabase
-      .rpc("member_insights")
-      .then(({ data, error }: { data: unknown; error: { message: string } | null }) => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("member_insights");
         if (cancelled) return;
         if (error) {
           console.error("member_insights RPC failed", error);
-          setLoading(false);
-          return;
+        } else {
+          setPayload(data as MemberInsightsPayload);
         }
-        setPayload(data as MemberInsightsPayload);
-        setLoading(false);
-      });
+      } catch (err) {
+        // Transport-level rejection (offline, aborted, tab throttling) — the
+        // returned-`error` branch above doesn't cover a rejected promise.
+        // Without this the four tabs would stay stuck on the skeleton forever.
+        if (!cancelled) console.error("member_insights RPC rejected", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isNationalAdmin]);
+  }, [authLoading, isAdmin]);
 
-  // Insights aggregate every chapter, so this card only shows for national
-  // admins. Chapter / region admins see the list below as before.
-  if (!authLoading && !isNationalAdmin) return null;
+  // Insights aggregate every chapter; visible to chapter admins and above.
+  // Members see the list below as before.
+  if (!authLoading && !isAdmin) return null;
 
   return (
     <Card>

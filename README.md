@@ -2,9 +2,18 @@
 
 A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, events, and fundraising campaigns. Built with Next.js and Supabase, integrated with Wild Apricot for membership data.
 
-> **Migration note (May 2026):** Moved off Firebase (Auth, Firestore, Storage, Cloud Functions) onto **Supabase** (Auth, Postgres, Edge Functions). At the same time the schema was **normalized** — every chapter reference is now a real foreign key (`chapterId`) rather than a duplicated chapter-name string. The event-poster upload feature was dropped, so Supabase Storage is not in scope. See [Transition.md](Transition.md) for the full migration plan, the post-deploy fixes (§13), and the rollback procedure.
+> **Migration note (May 2026):** Moved off Firebase (Auth, Firestore, Storage, Cloud Functions) onto **Supabase** (Auth, Postgres, Edge Functions). At the same time the schema was **normalized** — every chapter reference is now a real foreign key (`chapterId`) rather than a duplicated chapter-name string. The event-poster upload feature was dropped, so Supabase Storage is not in scope. The migration is complete; the full state lives in the versioned SQL under [supabase/migrations/](supabase/migrations/).
 >
-> **First-user bootstrap:** new sign-ins land with role `member`. To promote the very first user to `national_admin`, run the SQL in [Transition.md §13.8](Transition.md). After that, the in-app `/users` page can promote everyone else.
+> **First-user bootstrap:** new sign-ins land with role `member`. There is no in-app self-promotion path, so the very first `national_admin` must be set by hand. Run this once in the Supabase SQL editor, then sign out and back in for a fresh JWT — after that the in-app `/users` page can promote everyone else:
+>
+> ```sql
+> update public.users set role = 'national_admin' where email = 'you@example.com';
+> update auth.users
+> set raw_app_meta_data =
+>       coalesce(raw_app_meta_data, '{}'::jsonb)
+>       || jsonb_build_object('user_role', 'national_admin')
+> where email = 'you@example.com';
+> ```
 
 ---
 
@@ -21,6 +30,7 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - [Supabase Edge Functions & Sync Jobs](#supabase-edge-functions--sync-jobs)
 - [Roles & Permissions](#roles--permissions)
 - [Event Types & Hours Tracking](#event-types--hours-tracking)
+- [Bulk CSV Upload](#bulk-csv-upload)
 - [Read/Write Optimization](#readwrite-optimization)
 - [Data Models](#data-models)
 
@@ -40,7 +50,8 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - **User Management** — National admins can view all users and update roles, regions, and chapter assignments
 - **Advanced Data Tables** — Chapters, Events, and Fundraising pages feature a rich table view with sortable, resizable, and drag-to-reorder columns; per-column filters; column visibility toggles; and pagination. Switchable to a card grid via a pill toggle.
 - **Excel Export** — Tabular data exports to `.xlsx` via ExcelJS for offline analysis
-- **Charts** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress
+- **Bulk CSV Upload** — Admins can import spreadsheets instead of clicking row-by-row: event attendance (matched to members by email then name), fundraising campaigns, event creation, and sub-event attendance (national conferences). A shared dialog parses the CSV, classifies each row (ready / needs-resolution / skipped), lets the admin resolve conflicts inline (ambiguous names, unknown chapters, lapsed members), then applies. See [Bulk Upload](#bulk-csv-upload).
+- **Charts & Insights** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress, plus dedicated insights panels: chapter insights, fundraising insights, and a Members insights dashboard (region health, membership-level retention, education mix, and a 24-month renewal-cliff projection) served as a single JSON blob by the `member_insights()` RPC rather than shipping all ~14k rows to the client. The fundraising and Members insights panels are visible to **chapter admins and above** (members see the plain lists); the aggregates span every chapter.
 - **Responsive UI** — Mobile-friendly with sidebar navigation and dark mode support
 
 ---
@@ -184,8 +195,7 @@ philippine-nurses-association-of-america/
     │   ├── api/
     │   │   ├── auth/
     │   │   │   ├── signin/     # Start OAuth flow
-    │   │   │   ├── callback/   # Handle OAuth callback
-    │   │   │   ├── session/    # Create verified session cookie from ID token
+    │   │   │   ├── callback/   # Handle OAuth callback (mints the Supabase session)
     │   │   │   ├── setup/      # Save first-time chapter/region selection
     │   │   │   └── signout/    # Clear session cookie
     │   │   ├── sync/trigger/   # Manual sync trigger (national_admin only)
@@ -220,10 +230,10 @@ philippine-nurses-association-of-america/
     │   ├── auth/               # OnboardingGuard
     │   ├── layout/             # Header, Sidebar, MobileNav
     │   ├── dashboard/          # Stats cards, chapter list widget, fundraising progress, upcoming events
-    │   ├── events/             # Event list/card/form/detail, attendee list (paginated WA + manual), metrics & attendance charts
-    │   ├── chapters/           # Chapter list/card/detail, aliases manager, activity chart
-    │   ├── members/            # Paginated member list, per-member detail with hours rollup
-    │   ├── fundraising/        # Campaign list/card/form/detail, fundraising chart
+    │   ├── events/             # Event list/card/form/detail, attendee list (paginated WA + manual), metrics & attendance charts, sub-event manager (national conferences)
+    │   ├── chapters/           # Chapter list/card/detail, aliases manager, activity chart, chapter-insights charts
+    │   ├── members/            # Paginated member list, per-member detail with hours rollup, member-insights charts (chapter-admin and above)
+    │   ├── fundraising/        # Campaign list/card/form/detail, fundraising chart, fundraising-insights charts
     │   ├── subchapters/        # Subchapter list/form/detail
     │   ├── users/              # User list with edit dialog
     │   └── shared/             # PageHeader, SearchInput, AdvancedDataTable, DataTable, ViewToggle, EmptyState, StatusBadge
@@ -469,12 +479,23 @@ Every event has a **type** and **subtype**. The type drives how attendee hours a
 
 Wild Apricot–synced events default to `eventType: "conference"`, `eventSubtype: "in_person"`, `defaultHours: 0`. Admins can change these on the edit form; the subtype dropdown filters its options based on the chosen type.
 
+### National-Conference Sub-Events
+
+Events on the `national` chapter with `eventType: "conference"` gain a third hours mode: an ordered list of **sub-events** (e.g. "Opening Keynote", "Breakout A") drawn from a shared, case-insensitive catalog (`public.subevents`). Attendance is tracked per `(attendee, sub-event)` cell rather than per event, and hours roll up as `cardinality(attendedSubeventIds) * defaultHours`. An attendee's `attended` flag flips true as soon as they're marked for at least one sub-event.
+
+- `events.subeventIds uuid[]` — the event's ordered sub-event list
+- `attendees.attendedSubeventIds uuid[]` — which sub-events that attendee was marked for
+- A `BEFORE` trigger keeps `attendees.hours` / `attended` aligned with the array, but **only** for `national` conferences — every other event keeps the existing conference / community-outreach behavior untouched.
+- All mutations go through transactional RPCs so the attendee array and the event counters (`contactHours`, `attendedCount`) never drift: `set_subevent_attendance`, `bulk_set_subevent_attendance` (CSV import), `add_subevent_to_event` (find-or-create + unarchive), `remove_subevent_from_event`, and `reorder_event_subevents`. `propagate_conference_default_hours` is sub-event-aware: on `national` it rescales by array cardinality, elsewhere it flat-sets every attended row.
+
+Defined in [supabase/migrations/20260520000001_subevents.sql](supabase/migrations/20260520000001_subevents.sql); GIN indexes back the array membership lookups.
+
 ### Attendees: Wild Apricot vs Manual
 
 The `attendees` table holds two kinds of records, distinguished by the `source` column:
 
 - **`source: "wildapricot"`** — Synced from WA event registrations. Primary key is the WA registration ID. WA-managed fields (`name`, `registrationType`, `Status`, `paidSum`, etc.) are kept fresh by `sync-events` and the webhook. App-managed fields (`attended`, `hours`) are preserved across syncs by reading the existing row before upsert.
-- **`source: "app"`** — Added by an admin from the event detail page. Primary key is `app-{memberId}` so the same member can't be added twice. Always `attended: true` on creation. Linked to a `public.members` row via `memberId`.
+- **`source: "app"`** — Added by an admin from the event detail page (or the bulk attendance upload). Primary key is `app-{eventId}-{memberId}` — scoped to the event so the same member can be added to multiple events without a primary-key collision, while a per-`(eventId, memberId)` check still prevents adding them twice to the *same* event. Always `attended: true` on creation (manual add). Linked to a `public.members` row via `memberId`.
 
 The Add Attendee dialog requires the admin to pick from existing members (server-side `ILIKE` substring search, scoped to active members and optionally to the event's chapter). It refuses to add a member who is already on the event in either section.
 
@@ -487,6 +508,24 @@ The `/members/[memberId]` page queries `attendees` filtered by `memberId == X &&
 - A table of every event the member attended, with date / type / chapter / hours
 
 Powered by the `(memberId, attended)` composite index defined in [supabase/migrations/20260515000002_indexes.sql](supabase/migrations/20260515000002_indexes.sql).
+
+---
+
+## Bulk CSV Upload
+
+Admins can upload a CSV instead of entering records one at a time. All importers share one framework — a generic dialog shell plus a small per-feature **adapter** — so they parse and resolve conflicts the same way.
+
+- **Shared parsing**: [pnaa/lib/csv.ts](pnaa/lib/csv.ts) — a dependency-free RFC-4180-ish `parseCSV`, plus `parseBoolean`, `downloadCsv`, `splitHeader`, and a header-name column accessor (so column order doesn't matter).
+- **Shared shell**: [pnaa/components/shared/bulk-upload-dialog.tsx](pnaa/components/shared/bulk-upload-dialog.tsx) — `BulkUploadDialog` + `BulkUploadButton`, driven by a `BulkUploadAdapter<Row>` (`analyze`, `status`, `renderRow`, `apply`, optional `prepare`). The shell owns the dropzone, template download, summary badges (ready / needs-resolution / skipped), the row list, and apply + toasts.
+
+| Importer | CSV columns | Matching / resolution | Apply path |
+|---|---|---|---|
+| **Event attendance** ([bulk-attendance-csv.tsx](pnaa/components/events/bulk-attendance-csv.tsx)) | Name, Email, Attended, Hours | Match by **email → member → memberId**, then existing-attendee name, then a members-by-name lookup. Conflicts: ambiguous name (pick), lapsed member (confirm-add), no match. | One transactional RPC `bulk_set_attendance` — inserts missing app attendees, updates WA rows in place (matched by `memberId`, never duplicated), recomputes counters. |
+| **Fundraising campaigns** ([bulk-campaign-upload.tsx](pnaa/components/fundraising/bulk-campaign-upload.tsx)) | Fundraiser Name, Chapter, Date, Amount, Note | Resolve chapter by name (unknown → pick from a dropdown); validate date / amount. | Client-side `addDocument` loop, partial-failure tolerant ("Created X of Y"). |
+| **Event creation** ([bulk-event-upload.tsx](pnaa/components/events/bulk-event-upload.tsx)) | Name, Start/End Date, Chapter, Event Type, Subtype, Default Hours, Location | Resolve chapter by name; validate type; snap an invalid subtype to a default with a warning. Creates `source: "app"` events. | Client-side `addDocument` loop, partial-failure tolerant. |
+| **Sub-event attendance** ([bulk-attendance-upload.tsx](pnaa/components/events/bulk-attendance-upload.tsx)) | Name, Sub-Event, Attended | National-conference only. Resolves attendees + sub-event names; can create a missing sub-event inline. | RPC `bulk_set_subevent_attendance`. |
+
+The sub-event importer predates the shared shell and keeps its own (more intricate) resolution flow; it only shares `lib/csv.ts`. **No dedupe** on the fundraising/event importers — re-uploading the same file creates duplicate rows (the dialog warns of this); the attendance importer is idempotent (matched by `memberId` + counter recompute).
 
 ---
 
@@ -503,6 +542,8 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 | **Optimistic local updates** | Attendee list (toggle attended, edit hours, add/remove manual) | Admin actions update local state immediately; Postgres write happens in the background with rollback on failure. No re-fetch needed after the write. |
 | **Diff-write `sync-members`** | `scripts/sync-members.ts` | Reads existing member rows once, then only upserts rows whose tracked fields actually changed. At 14k members a full sync typically writes 50–500 rows instead of 14k. |
 | **Active-only filter default** | `/members` listing, member picker | Reduces working set from ~14k to active members (~9–10k typically). |
+| **Transactional RPCs** | Attendee/event writes, sub-event attendance, bulk attendance import | Multi-statement writes (attendee row + event counters) collapse into one `SECURITY INVOKER` call so counters never drift and RLS still applies. See [20260516000001_rpcs.sql](supabase/migrations/20260516000001_rpcs.sql), [20260520000001_subevents.sql](supabase/migrations/20260520000001_subevents.sql), and [20260602000002_bulk_attendance.sql](supabase/migrations/20260602000002_bulk_attendance.sql) (`bulk_set_attendance`). |
+| **Single-roundtrip aggregates** | `/members` insights, chapter/fundraising insights | `member_insights()` computes region/level/education/renewal-cliff rollups server-side and returns one JSON blob instead of streaming ~14k rows for client-side chart math. |
 
 ### Live listeners are kept where freshness matters
 
@@ -544,7 +585,7 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
   startTime: string
   endTime: string
   location: string
-  chapterId: string | null       // FK → chapters.id; null for national / cross-chapter events
+  chapterId: string | null       // FK → chapters.id; WA-imported / cross-chapter events default to the seeded 'national' chapter
   about: string
   archived: boolean
 
@@ -569,6 +610,9 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
   // Optional subchapter association
   subchapterId?: string
 
+  // Ordered sub-event list (national conferences only — see "National-Conference Sub-Events")
+  subeventIds: string[]
+
   source: "wildapricot" | "app"
   lastUpdatedUser: string
   lastUpdated: Timestamp
@@ -579,7 +623,7 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 ### Attendee (table: `public.attendees`, FK → `events.id`)
 ```typescript
 {
-  // Primary key is `registrationId` for WA records, `app-{memberId}` for manual records.
+  // Primary key is `registrationId` for WA records, `app-{eventId}-{memberId}` for app/manual records.
   id: string
   registrationId: string
   eventId: string
@@ -589,6 +633,7 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
   // App-managed (admins toggle these from the event detail page)
   attended: boolean
   hours: number
+  attendedSubeventIds: string[] // Sub-events this attendee was marked for (national conferences); drives hours/attended via trigger
   source: "wildapricot" | "app"
   memberId: string          // Always set; mirrors contactId for WA, the picked member for app records
 

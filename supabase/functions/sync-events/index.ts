@@ -62,12 +62,39 @@ function eventToRow(ev: Record<string, unknown>): EventRow {
   };
 }
 
+type MissingMember = { contactId: string; name: string };
+
+type SyncOutcome = {
+  eventId: string;
+  ok: boolean;
+  reason?: string;
+  // Registration contacts that aren't in the members table — the usual cause
+  // of a failed event sync (attendees.memberId FK violation).
+  missingMembers: MissingMember[];
+};
+
+// Which of these contact ids are NOT present in public.members? Chunked so a
+// large conference (thousands of registrants) can't blow the PostgREST URL.
+async function findMissingMembers(
+  supabase: ReturnType<typeof getServiceClient>,
+  contactIds: string[],
+): Promise<Set<string>> {
+  const missing = new Set(contactIds);
+  const CHUNK = 200;
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const slice = contactIds.slice(i, i + CHUNK);
+    const { data } = await supabase.from("members").select("id").in("id", slice);
+    for (const m of data ?? []) missing.delete((m as { id: string }).id);
+  }
+  return missing;
+}
+
 async function syncOneEvent(
   supabase: ReturnType<typeof getServiceClient>,
   accessToken: string,
   accountId: string,
   evId: string,
-): Promise<void> {
+): Promise<SyncOutcome> {
   // Fetch WA registrations (paginated; this is the one network call we can't
   // collapse into Postgres).
   const regs = await fetchWAEventRegistrations(accessToken, accountId, evId);
@@ -80,11 +107,28 @@ async function syncOneEvent(
     p_event_id: evId,
     p_registrations: regs,
   });
-  if (error) {
-    // Best-effort: clear sync lock if the RPC failed mid-flight.
-    await supabase.from("events").update({ syncLock: null }).eq("id", evId);
-    throw error;
+  if (!error) return { eventId: evId, ok: true, missingMembers: [] };
+
+  // Best-effort: clear sync lock if the RPC failed mid-flight.
+  await supabase.from("events").update({ syncLock: null }).eq("id", evId);
+
+  // Diagnose: surface the registration contacts that aren't in members so they
+  // can be investigated. (Other failures — e.g. lock contention — leave this
+  // list empty and just report the reason.)
+  const contactIds = [...new Set(regs.map((r) => r.contactId).filter(Boolean))];
+  const missingIds = contactIds.length > 0
+    ? await findMissingMembers(supabase, contactIds)
+    : new Set<string>();
+  const seen = new Set<string>();
+  const missingMembers: MissingMember[] = [];
+  for (const r of regs) {
+    if (r.contactId && missingIds.has(r.contactId) && !seen.has(r.contactId)) {
+      seen.add(r.contactId);
+      missingMembers.push({ contactId: r.contactId, name: r.name });
+    }
   }
+
+  return { eventId: evId, ok: false, reason: String(error.message ?? error), missingMembers };
 }
 
 Deno.serve(async (req) => {
@@ -125,6 +169,8 @@ Deno.serve(async (req) => {
     const allIds = rawEvents.map((ev) => String(ev.Id));
     let processed = 0;
     let skipped = 0;
+    // contactId → { name, eventIds } across every skipped event.
+    const missingMembers = new Map<string, { name: string; eventIds: string[] }>();
     for (let i = 0; i < allIds.length; i += 3) {
       const batch = allIds.slice(i, i + 3);
       const results = await Promise.allSettled(
@@ -135,6 +181,21 @@ Deno.serve(async (req) => {
         if (r.status === "rejected") {
           skipped++;
           console.warn(`sync-events: skipped event ${batch[j]}: ${r.reason}`);
+        } else if (!r.value.ok) {
+          skipped++;
+          const o = r.value;
+          console.warn(`sync-events: skipped event ${o.eventId}: ${o.reason}`);
+          if (o.missingMembers.length > 0) {
+            for (const m of o.missingMembers) {
+              const hit = missingMembers.get(m.contactId);
+              if (hit) hit.eventIds.push(o.eventId);
+              else missingMembers.set(m.contactId, { name: m.name, eventIds: [o.eventId] });
+            }
+            console.warn(
+              `sync-events: event ${o.eventId} references ${o.missingMembers.length} unknown member id(s): ` +
+                o.missingMembers.map((m) => m.contactId).join(", "),
+            );
+          }
         } else {
           processed++;
         }
@@ -144,10 +205,33 @@ Deno.serve(async (req) => {
       `sync-events: synced registrations for ${processed} events (skipped ${skipped})`,
     );
 
-    await supabase.from("sync_logs").insert({ type: "events", status: "complete" });
+    const missingMemberIds = [...missingMembers.entries()].map(
+      ([contactId, { name, eventIds }]) => ({ contactId, name, eventIds }),
+    );
+    if (missingMemberIds.length > 0) {
+      console.warn(
+        `sync-events: ${missingMemberIds.length} unique member id(s) not found in members: ` +
+          missingMemberIds.map((m) => m.contactId).join(", "),
+      );
+    }
+
+    await supabase.from("sync_logs").insert({
+      type: "events",
+      status: "complete",
+      error: missingMemberIds.length > 0
+        ? `${missingMemberIds.length} unknown member id(s) across ${skipped} skipped event(s): ` +
+          missingMemberIds.map((m) => m.contactId).join(", ")
+        : null,
+    });
 
     return new Response(
-      JSON.stringify({ events: rawEvents.length, newEvents: newRows.length }),
+      JSON.stringify({
+        events: rawEvents.length,
+        newEvents: newRows.length,
+        processed,
+        skipped,
+        missingMemberIds,
+      }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (err) {

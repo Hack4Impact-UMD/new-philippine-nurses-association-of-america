@@ -123,7 +123,8 @@ async function handleEvent(
   resolver: ChapterResolver,
 ) {
   if (action === "Deleted") {
-    await supabase.from("events").update({ archived: true }).eq("id", eventId);
+    const { error } = await supabase.from("events").update({ archived: true }).eq("id", eventId);
+    if (error) throw error;
     return;
   }
 
@@ -142,7 +143,7 @@ async function handleEvent(
   // WA events have no structured chapter field, so default to National.
   // Admins can reassign from the app afterwards.
   await flushPendingChapters(supabase, resolver);
-  await supabase.from("events").insert({
+  const { error: insertErr } = await supabase.from("events").insert({
     id: eventId,
     name: String(raw.Name ?? ""),
     startDate: raw.StartDate ? String(raw.StartDate) : null,
@@ -151,6 +152,7 @@ async function handleEvent(
     chapterId: DEFAULT_IMPORT_CHAPTER_ID,
     archived: false,
   });
+  if (insertErr) throw insertErr;
 }
 
 async function handleEventRegistration(
@@ -162,11 +164,12 @@ async function handleEventRegistration(
   action: string,
 ) {
   if (action === "Deleted") {
-    await supabase
+    const { error } = await supabase
       .from("attendees")
       .delete()
       .eq("registrationId", registrationId)
       .eq("source", "wildapricot");
+    if (error) throw error;
     return;
   }
 
@@ -176,10 +179,11 @@ async function handleEventRegistration(
     .eq("id", eventId)
     .maybeSingle();
   if (!ev) {
-    await supabase.from("pending_registrations").upsert(
+    const { error } = await supabase.from("pending_registrations").upsert(
       { id: registrationId, eventId, payload: { action, registrationId, eventId }, attempts: 0 },
       { onConflict: "id" },
     );
+    if (error) throw error;
     return;
   }
 
@@ -192,7 +196,7 @@ async function handleEventRegistration(
     .eq("id", registrationId)
     .maybeSingle();
 
-  await supabase.from("attendees").upsert(
+  const { error: upsertErr } = await supabase.from("attendees").upsert(
     {
       id: registrationId,
       registrationId,
@@ -214,6 +218,7 @@ async function handleEventRegistration(
     },
     { onConflict: "id" },
   );
+  if (upsertErr) throw upsertErr;
 }
 
 Deno.serve(async (req) => {

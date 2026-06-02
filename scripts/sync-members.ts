@@ -67,8 +67,11 @@ async function fetchAllWAContacts(
     const pageUrl = `${baseUrl}${sep}$top=${PAGE_SIZE}&$skip=${skip}`;
     const r = await fetch(pageUrl, { headers });
     if (!r.ok) {
-      console.error(`WA contacts page failed at skip=${skip}: ${r.statusText}`);
-      break;
+      // Throw rather than break: a partial snapshot would zero out chapter
+      // aggregates for chapters whose members didn't make it into this run,
+      // and still log the sync as "complete". Let main()'s catch record a
+      // failure and skip the destructive chapter upserts.
+      throw new Error(`WA contacts page failed at skip=${skip}: ${r.statusText}`);
     }
     console.log(`syncMembers: fetched contacts page at skip=${skip}`);
     const pageData = (await r.json()) as Record<string, unknown>;

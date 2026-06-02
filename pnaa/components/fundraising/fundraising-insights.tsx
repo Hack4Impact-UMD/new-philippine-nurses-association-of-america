@@ -22,7 +22,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { useAuth, useIsNationalAdmin } from "@/hooks/use-auth";
+import { useAuth, useIsAdmin } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { formatCurrency } from "@/lib/utils";
 import type { FundraisingCampaign } from "@/types/fundraising";
@@ -53,10 +53,10 @@ export function FundraisingInsights({
   loading,
 }: FundraisingInsightsProps) {
   const { isLoading: authLoading } = useAuth();
-  const isNationalAdmin = useIsNationalAdmin();
+  const isAdmin = useIsAdmin();
 
-  // National-admin only — these aggregate every chapter.
-  if (!authLoading && !isNationalAdmin) return null;
+  // Visible to chapter admins and above; members see the list only.
+  if (!authLoading && !isAdmin) return null;
 
   return (
     <Card>

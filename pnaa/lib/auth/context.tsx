@@ -81,28 +81,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Tab-recovery: after a long suspension, Supabase's auto-refresh timer can
-  // wedge in a never-resolving state and every query hangs forever. When the
-  // tab becomes visible again, force a session refresh + cache invalidation.
-  // If the refresh itself stalls past 5s, reload — same outcome as the user's
-  // manual reload but automatic.
+  // Tab-recovery: the auth lock can wedge in a never-resolving state and every
+  // query then hangs forever (see lib/supabase/client.ts). The timeout-bounded
+  // lock prevents most wedges; this watchdog is the backstop that recovers any
+  // that still slip through, via two triggers:
+  //   1. Tab becomes visible after a long suspension (the classic case).
+  //   2. A periodic health-check — covers a wedge on a continuously-visible tab
+  //      (e.g. the 1h token expiry during active use), which trigger 1 misses.
   useEffect(() => {
     const HIDDEN_THRESHOLD_MS = 2 * 60 * 1000;
     const REFRESH_TIMEOUT_MS = 5 * 1000;
+    const HEALTHCHECK_INTERVAL_MS = 60 * 1000;
+    const HEALTHCHECK_TIMEOUT_MS = 4 * 1000;
     let hiddenAt: number | null = null;
+    let recovering = false;
 
-    const handle = async () => {
-      if (typeof document === "undefined") return;
-      if (document.visibilityState === "hidden") {
-        hiddenAt = Date.now();
-        return;
-      }
-      if (document.visibilityState !== "visible") return;
-      if (hiddenAt == null) return;
-      const elapsed = Date.now() - hiddenAt;
-      hiddenAt = null;
-      if (elapsed < HIDDEN_THRESHOLD_MS) return;
-
+    // Force a session refresh + cache invalidation. If the refresh itself
+    // stalls, reload — same outcome as the user's manual reload but automatic.
+    const forceRefresh = async () => {
+      if (recovering) return;
+      recovering = true;
       const supabase = getSupabaseBrowser();
       try {
         await Promise.race([
@@ -116,11 +114,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         // Refresh stalled — the safest path is the user's manual fix.
         window.location.reload();
+      } finally {
+        recovering = false;
       }
     };
 
-    document.addEventListener("visibilitychange", handle);
-    return () => document.removeEventListener("visibilitychange", handle);
+    const handleVisibility = async () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      if (hiddenAt == null) return;
+      const elapsed = Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (elapsed < HIDDEN_THRESHOLD_MS) return;
+      await forceRefresh();
+    };
+
+    // Probe getSession() with a short timeout. It resolves locally from the
+    // stored session, so a timeout means the auth lock is wedged — recover.
+    const healthCheck = async () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState !== "visible") return; // hidden tabs throttle timers anyway
+      if (recovering) return;
+      const supabase = getSupabaseBrowser();
+      try {
+        await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("getSession-timeout")), HEALTHCHECK_TIMEOUT_MS)
+          ),
+        ]);
+      } catch {
+        await forceRefresh();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    const interval = setInterval(healthCheck, HEALTHCHECK_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearInterval(interval);
+    };
   }, []);
 
   const signIn = () => {

@@ -13,16 +13,21 @@ interface Props {
 
 export function ChapterActivityChart({ chapters, loading }: Props) {
   const regions = useMemo(() => {
-    const set = new Set(chapters.map((c) => c.region).filter(Boolean));
+    const set = new Set(
+      chapters.filter((c) => c.id !== "national").map((c) => c.region).filter(Boolean)
+    );
     return ["All", ...Array.from(set).sort()];
   }, [chapters]);
 
   const [selectedRegion, setSelectedRegion] = useState("All");
 
   const bars = useMemo(() => {
+    // Exclude the seeded "national" catch-all chapter — it's a bucket for
+    // cross-chapter / WA-imported events, not a real chapter membership.
+    const realChapters = chapters.filter((c) => c.id !== "national");
     const filtered = selectedRegion === "All"
-      ? chapters
-      : chapters.filter((c) => c.region === selectedRegion);
+      ? realChapters
+      : realChapters.filter((c) => c.region === selectedRegion);
 
     return [...filtered]
       .sort((a, b) => b.totalActive - a.totalActive)

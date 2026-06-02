@@ -28,9 +28,11 @@ import {
   addSubeventToEvent,
   bulkSetSubeventAttendance,
   fetchAllAttendees,
+  manualAttendeeId,
   type BulkSubeventRow,
 } from "@/lib/supabase/attendees";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { parseCSV, parseBoolean as parseAttended, downloadCsv } from "@/lib/csv";
 import type { Attendee } from "@/types/attendee";
 import type { AppEvent } from "@/types/event";
 import type { Member } from "@/types/member";
@@ -40,55 +42,6 @@ interface BulkAttendanceUploadProps {
   onOpenChange: (open: boolean) => void;
   event: AppEvent & { id: string };
   onApplied?: () => void;
-}
-
-// ---------- CSV parsing ----------
-
-function parseCSV(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"' && text[i + 1] === '"') {
-        field += '"';
-        i++;
-      } else if (c === '"') {
-        inQuotes = false;
-      } else {
-        field += c;
-      }
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ",") {
-        row.push(field);
-        field = "";
-      } else if (c === "\n") {
-        row.push(field);
-        rows.push(row);
-        row = [];
-        field = "";
-      } else if (c === "\r") {
-        // skip
-      } else {
-        field += c;
-      }
-    }
-  }
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows.filter((r) => r.some((cell) => cell.trim().length > 0));
-}
-
-function parseAttended(raw: string): boolean | null {
-  const v = raw.trim().toLowerCase();
-  if (["yes", "y", "true", "1", "x", "✓"].includes(v)) return true;
-  if (["no", "n", "false", "0", "", "-"].includes(v)) return false;
-  return null;
 }
 
 // ---------- Resolution types ----------
@@ -147,15 +100,7 @@ const TEMPLATE_CSV = [
 ].join("\n");
 
 function downloadTemplate() {
-  const blob = new Blob([TEMPLATE_CSV], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "subevent-attendance-template.csv";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  downloadCsv("subevent-attendance-template.csv", TEMPLATE_CSV);
 }
 
 // ---------- Main component ----------
@@ -421,7 +366,7 @@ function BulkAttendanceBody({
         user: user?.email || "",
       });
       // Push the new attendee into local state so other rows with this name resolve.
-      const id = `app-${memberId}`;
+      const id = manualAttendeeId(event.id, memberId);
       const newAttendee: Attendee & { id: string } = {
         id,
         registrationId: id,

@@ -94,8 +94,9 @@
   --warning: oklch(0.75 0.15 85);
   --warning-foreground: oklch(0.2 0.04 85);
 
-  /* Charts — PNAA palette */
-  --chart-1: oklch(0.42 0.14 260);
+  /* Charts — PNAA palette. chart-1 is teal (was deep navy) so the primary
+     series reads distinctly against the navy sidebar/brand and the gold. */
+  --chart-1: oklch(0.54 0.115 210);
   --chart-2: oklch(0.75 0.15 85);
   --chart-3: oklch(0.55 0.22 25);
   --chart-4: oklch(0.55 0.16 145);
@@ -136,7 +137,7 @@
   --success-foreground: oklch(0.985 0 0);
   --warning: oklch(0.75 0.15 85);
   --warning-foreground: oklch(0.2 0.04 85);
-  --chart-1: oklch(0.6 0.16 260);
+  --chart-1: oklch(0.66 0.12 210);
   --chart-2: oklch(0.75 0.15 85);
   --chart-3: oklch(0.65 0.2 22);
   --chart-4: oklch(0.6 0.16 145);

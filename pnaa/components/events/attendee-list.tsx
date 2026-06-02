@@ -34,6 +34,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchInput } from "@/components/shared/search-input";
 import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import { BulkAttendanceUpload } from "@/components/events/bulk-attendance-upload";
+import { BulkAttendanceCsvDialog } from "@/components/events/bulk-attendance-csv";
 import { toast } from "sonner";
 import { useAuth, useIsAdmin, useIsNationalAdmin } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
@@ -46,6 +47,7 @@ import {
   setSubeventAttendance,
   addManualAttendee,
   removeManualAttendee,
+  manualAttendeeId,
 } from "@/lib/supabase/attendees";
 import type { Attendee } from "@/types/attendee";
 import type { AppEvent } from "@/types/event";
@@ -590,6 +592,21 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         </section>
       )}
 
+      {!isNational && isAdmin && (
+        <section className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold">Bulk Attendance</p>
+            <p className="text-xs text-muted-foreground">
+              Upload a CSV (Name, Email, Attended, Hours) to mark many people at once.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setBulkUploadOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
+            Bulk Upload Attendance
+          </Button>
+        </section>
+      )}
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h3 className="text-sm font-semibold">
@@ -676,6 +693,15 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
 
       {isNational && isAdmin && (
         <BulkAttendanceUpload
+          open={bulkUploadOpen}
+          onOpenChange={setBulkUploadOpen}
+          event={event}
+          onApplied={refetchAfterBulk}
+        />
+      )}
+
+      {!isNational && isAdmin && (
+        <BulkAttendanceCsvDialog
           open={bulkUploadOpen}
           onOpenChange={setBulkUploadOpen}
           event={event}
@@ -843,8 +869,8 @@ function AddManualAttendeeDialogBody({
       // Mirror the doc that addManualAttendee just wrote so the parent list
       // updates without a re-fetch.
       onAdded({
-        id: `app-${selected.id}`,
-        registrationId: `app-${selected.id}`,
+        id: manualAttendeeId(event.id, selected.id),
+        registrationId: manualAttendeeId(event.id, selected.id),
         eventId: event.id,
         contactId: selected.id,
         name: selected.name,

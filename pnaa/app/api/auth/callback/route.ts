@@ -36,6 +36,9 @@ export async function GET(request: NextRequest) {
     const { access_token } = await exchangeCodeForToken(code);
     const contact = await getContactInfo(access_token);
     const email = contact.Email;
+    if (!email) {
+      throw new Error("Wild Apricot contact has no email address");
+    }
     const displayName = `${contact.FirstName} ${contact.LastName}`.trim();
     const emailLower = email.toLowerCase();
 

@@ -238,8 +238,8 @@ export function ChapterDetail({ chapterId }: { chapterId: string }) {
                 {(aliases as AliasRow[]).map((alias) => (
                   <Badge
                     key={alias.id}
-                    variant="secondary"
-                    className="text-xs font-normal gap-1"
+                    variant="outline"
+                    className="text-xs font-normal gap-1 text-muted-foreground"
                   >
                     <GitMerge className="h-2.5 w-2.5" />
                     {alias.aliasName}

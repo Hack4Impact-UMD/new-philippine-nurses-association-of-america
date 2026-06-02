@@ -8,7 +8,11 @@ import type { EventType } from "@/types/event";
 import { getSupabaseBrowser } from "./client";
 import { hydrateTimestamps, Timestamp } from "./timestamp";
 
-export const manualAttendeeId = (memberId: string) => `app-${memberId}`;
+// App-attendee id is scoped to the event so the same member can be added to
+// multiple events without an attendees_pkey collision. Must match the id built
+// by add_manual_attendee / bulk_set_attendance in the SQL migrations.
+export const manualAttendeeId = (eventId: string, memberId: string) =>
+  `app-${eventId}-${memberId}`;
 
 export async function setAttendance(params: {
   eventId: string;
@@ -226,6 +230,34 @@ export async function bulkSetSubeventAttendance(params: {
 }): Promise<void> {
   const supabase = getSupabaseBrowser();
   const { error } = await supabase.rpc("bulk_set_subevent_attendance", {
+    p_event_id: params.eventId,
+    p_rows: params.rows,
+    p_user: params.user,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export interface BulkAttendanceRow {
+  memberId: string;
+  name: string;
+  attended: boolean;
+  // Community-outreach override; ignored for conferences (RPC derives hours).
+  hours?: number;
+}
+
+/**
+ * Apply a parsed CSV of regular attendance in one transaction. Rows are matched
+ * to existing attendees by memberId (WA rows updated in place, never
+ * duplicated); members not yet on the event get an app-source row. See
+ * supabase/migrations/20260602000002_bulk_attendance.sql.
+ */
+export async function bulkSetAttendance(params: {
+  eventId: string;
+  rows: BulkAttendanceRow[];
+  user: string;
+}): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("bulk_set_attendance", {
     p_event_id: params.eventId,
     p_rows: params.rows,
     p_user: params.user,

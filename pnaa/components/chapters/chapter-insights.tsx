@@ -113,9 +113,9 @@ export function ChapterInsights({
 }
 
 // ─── Renewal Pipeline ──────────────────────────────────────────────────────
-// Dual-tone bar charts use PNAA deep royal (--chart-1) + a brighter blue
-// (#3b82f6, matching the chapters-page activity chart) instead of gold, per
-// design preference. Tokens go through ChartContainer's --color-* aliasing.
+// Dual-tone bar charts use the primary chart token (--chart-1, teal) + a
+// brighter blue (#3b82f6, matching the chapters-page activity chart) instead
+// of gold, per design preference. Tokens go through ChartContainer's --color-* aliasing.
 const renewalConfig = {
   active: { label: "Active", color: "var(--chart-1)" },
   lapsed: { label: "Lapsed", color: "#3b82f6" },
