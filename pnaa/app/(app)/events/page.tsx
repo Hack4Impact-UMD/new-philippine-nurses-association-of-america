@@ -17,12 +17,12 @@ export default function EventsPage() {
         {isAdmin && (
           <div className="flex items-center gap-2">
             <BulkEventUploadButton />
-            <Link href="/events/new">
-              <Button>
+            <Button asChild>
+              <Link href="/events/new">
                 <Plus className="mr-2 h-4 w-4" />
                 Add Event
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         )}
       </PageHeader>

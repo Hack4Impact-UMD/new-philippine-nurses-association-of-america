@@ -61,6 +61,10 @@ function useCampaignAdapter(): BulkUploadAdapter<FundRow> {
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    // Rows already written in a previous apply() of this dialog session. On a
+    // partial-failure retry we skip them so successes aren't duplicated.
+    const appliedKeys = new Set<string>();
+
     const analyze = async (grid: string[][]): Promise<FundRow[]> => {
       const { headerMap, dataRows } = splitHeader(grid, KNOWN_HEADERS);
       return dataRows
@@ -130,7 +134,7 @@ function useCampaignAdapter(): BulkUploadAdapter<FundRow> {
       let ok = 0;
       const errors: string[] = [];
       for (const row of readyRows) {
-        if (row.resolution.kind !== "ready") continue;
+        if (row.resolution.kind !== "ready" || appliedKeys.has(row.key)) continue;
         const r = row.resolution;
         try {
           await addDocument("fundraising", {
@@ -144,6 +148,7 @@ function useCampaignAdapter(): BulkUploadAdapter<FundRow> {
             lastUpdated: Timestamp.now(),
             creationDate: Timestamp.now(),
           });
+          appliedKeys.add(row.key);
           ok++;
         } catch (e) {
           errors.push(`Row ${row.index}: ${e instanceof Error ? e.message : "failed"}`);
@@ -151,7 +156,7 @@ function useCampaignAdapter(): BulkUploadAdapter<FundRow> {
       }
       if (errors.length > 0) {
         throw new Error(
-          `Created ${ok} of ${readyRows.length} campaigns. ${errors.length} failed — ${errors[0]}`
+          `Created ${ok} of ${errors.length + ok}. ${errors.length} failed (retry to re-attempt only those) — ${errors[0]}`
         );
       }
       return { appliedCount: ok, message: `Created ${ok} campaign${ok === 1 ? "" : "s"}` };

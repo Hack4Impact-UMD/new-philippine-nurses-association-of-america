@@ -37,6 +37,7 @@ type AttResolution =
   | { kind: "inactive_member"; memberId: string; name: string; attended: boolean; hours?: number }
   | { kind: "no_match" }
   | { kind: "bad_attended"; raw: string }
+  | { kind: "invalid"; reason: string }
   | { kind: "skipped" };
 
 interface AttRow {
@@ -57,11 +58,13 @@ const TEMPLATE_CSV = [
   "John Smith,,yes,",
 ].join("\n");
 
-function parseHours(raw: string): number | undefined {
+// undefined = blank (no override), null = malformed (surfaced as a conflict so
+// e.g. "two" isn't silently dropped).
+function parseHours(raw: string): number | null | undefined {
   const t = raw.trim();
   if (!t) return undefined;
   const n = Number(t);
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 async function searchMembersByName(name: string): Promise<MemberLite[]> {
@@ -156,6 +159,9 @@ function useAttendanceAdapter(
           return { ...base, resolution: { kind: "bad_attended", raw: p.attended } };
         }
         const hours = parseHours(p.hours);
+        if (hours === null) {
+          return { ...base, resolution: { kind: "invalid", reason: `Couldn't read hours "${p.hours}".` } };
+        }
 
         // Email is the precise key.
         const m = p.email ? byEmail.get(p.email.trim().toLowerCase()) : undefined;
@@ -321,6 +327,10 @@ function AttendanceRowItem({ row, api }: { row: AttRow; api: RowApi<AttRow> }) {
         note="No attendee or member matches this email or name."
       />
     );
+  }
+
+  if (res.kind === "invalid") {
+    return <ConflictShell row={row} onSkip={skip} note={res.reason} />;
   }
 
   if (res.kind === "inactive_member") {

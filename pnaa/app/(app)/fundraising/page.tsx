@@ -20,12 +20,12 @@ export default function FundraisingPage() {
         {isAdmin && (
           <div className="flex items-center gap-2">
             <BulkCampaignUploadButton />
-            <Link href="/fundraising/new">
-              <Button>
+            <Button asChild>
+              <Link href="/fundraising/new">
                 <Plus className="mr-2 h-4 w-4" />
                 Add Campaign
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         )}
       </PageHeader>

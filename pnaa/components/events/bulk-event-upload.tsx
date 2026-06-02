@@ -92,6 +92,10 @@ function useEventAdapter(): BulkUploadAdapter<EvtRow> {
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    // Events already written in a previous apply() of this dialog session —
+    // skipped on a partial-failure retry so successes aren't duplicated.
+    const appliedKeys = new Set<string>();
+
     const analyze = async (grid: string[][]): Promise<EvtRow[]> => {
       const { headerMap, dataRows } = splitHeader(grid, KNOWN_HEADERS);
       return dataRows
@@ -117,6 +121,10 @@ function useEventAdapter(): BulkUploadAdapter<EvtRow> {
             return { ...base, resolution: { kind: "invalid", reason: `Couldn't read start date "${p.startDate}".` } as const };
           }
           const endDate = normalizeDate(p.endDate) ?? startDate;
+          // YYYY-MM-DD strings compare correctly lexicographically.
+          if (endDate < startDate) {
+            return { ...base, resolution: { kind: "invalid", reason: `End date (${endDate}) precedes start date (${startDate}).` } as const };
+          }
           const eventType = parseEventType(p.rawType);
           if (!eventType) {
             return { ...base, resolution: { kind: "invalid", reason: `Event type must be "conference" or "community_outreach" (got "${p.rawType}").` } as const };
@@ -168,7 +176,7 @@ function useEventAdapter(): BulkUploadAdapter<EvtRow> {
       let ok = 0;
       const errors: string[] = [];
       for (const row of readyRows) {
-        if (row.resolution.kind !== "ready") continue;
+        if (row.resolution.kind !== "ready" || appliedKeys.has(row.key)) continue;
         const { chapterId, draft } = row.resolution;
         try {
           await addDocument("events", {
@@ -199,6 +207,7 @@ function useEventAdapter(): BulkUploadAdapter<EvtRow> {
             lastUpdated: Timestamp.now(),
             creationDate: Timestamp.now(),
           });
+          appliedKeys.add(row.key);
           ok++;
         } catch (e) {
           errors.push(`Row ${row.index}: ${e instanceof Error ? e.message : "failed"}`);
@@ -206,7 +215,7 @@ function useEventAdapter(): BulkUploadAdapter<EvtRow> {
       }
       if (errors.length > 0) {
         throw new Error(
-          `Created ${ok} of ${readyRows.length} events. ${errors.length} failed — ${errors[0]}`
+          `Created ${ok} of ${errors.length + ok}. ${errors.length} failed (retry to re-attempt only those) — ${errors[0]}`
         );
       }
       return { appliedCount: ok, message: `Created ${ok} event${ok === 1 ? "" : "s"}` };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Upload, Download, Check, AlertTriangle } from "lucide-react";
 import {
@@ -122,6 +122,7 @@ function BulkUploadBody<Row extends { key: string }>({
   const [parsing, setParsing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // One-time lookup load (attendees, members, chapters …) when the modal opens.
   useEffect(() => {
@@ -237,11 +238,7 @@ function BulkUploadBody<Row extends { key: string }>({
         </div>
 
         {!hasData && (
-          <label
-            className={
-              "flex flex-col items-center justify-center rounded-md border-2 border-dashed py-10 cursor-pointer transition " +
-              (dragOver ? "bg-muted/50 border-primary" : "border-muted")
-            }
+          <div
             onDragOver={(e) => {
               e.preventDefault();
               setDragOver(true);
@@ -255,6 +252,7 @@ function BulkUploadBody<Row extends { key: string }>({
             }}
           >
             <input
+              ref={inputRef}
               type="file"
               accept=".csv,text/csv"
               className="hidden"
@@ -263,16 +261,28 @@ function BulkUploadBody<Row extends { key: string }>({
                 if (file) handleFile(file);
               }}
             />
-            <Upload className="h-6 w-6 text-muted-foreground mb-2" />
-            <p className="text-sm font-medium">
-              {parsing
-                ? "Parsing..."
-                : !ready
-                  ? "Loading..."
-                  : "Drop a CSV here or click to choose"}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">{adapter.columnsHint}</p>
-          </label>
+            {/* A real <button> so the control is keyboard-focusable and
+                Enter/Space open the file picker — a hidden <input> inside a
+                <label> can't receive focus. */}
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className={
+                "flex w-full flex-col items-center justify-center rounded-md border-2 border-dashed py-10 cursor-pointer transition " +
+                (dragOver ? "bg-muted/50 border-primary" : "border-muted")
+              }
+            >
+              <Upload className="h-6 w-6 text-muted-foreground mb-2" />
+              <span className="text-sm font-medium">
+                {parsing
+                  ? "Parsing..."
+                  : !ready
+                    ? "Loading..."
+                    : "Drop a CSV here or click to choose"}
+              </span>
+              <span className="text-xs text-muted-foreground mt-1">{adapter.columnsHint}</span>
+            </button>
+          </div>
         )}
 
         {hasData && (

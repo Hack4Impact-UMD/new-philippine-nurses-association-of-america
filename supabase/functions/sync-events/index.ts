@@ -109,8 +109,10 @@ async function syncOneEvent(
   });
   if (!error) return { eventId: evId, ok: true, missingMembers: [] };
 
-  // Best-effort: clear sync lock if the RPC failed mid-flight.
-  await supabase.from("events").update({ syncLock: null }).eq("id", evId);
+  // Don't touch syncLock here. The RPC sets and clears its own lock inside its
+  // transaction, so a failure rolls back this run's lock write entirely — and
+  // if the failure was lock contention, the lock belongs to another in-flight
+  // worker that we must not clear out from under it.
 
   // Diagnose: surface the registration contacts that aren't in members so they
   // can be investigated. (Other failures — e.g. lock contention — leave this
@@ -157,7 +159,13 @@ Deno.serve(async (req) => {
       if (!existingIds.has(row.id)) newRows.push(row);
     }
     if (newRows.length > 0) {
-      const { error } = await supabase.from("events").insert(newRows);
+      // Upsert-ignore rather than plain insert: another worker may insert one of
+      // these ids between our select above and this write (TOCTOU). ON CONFLICT
+      // DO NOTHING skips the duplicate instead of aborting the whole sync, and
+      // never overwrites an existing row's app-managed fields.
+      const { error } = await supabase
+        .from("events")
+        .upsert(newRows, { onConflict: "id", ignoreDuplicates: true });
       if (error) throw error;
     }
     console.log(`sync-events: inserted ${newRows.length} new events`);
