@@ -81,8 +81,8 @@ export function ChapterInsights({
   loading,
 }: ChapterInsightsProps) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
+    <Card className="gap-3">
+      <CardHeader>
         <CardTitle className="text-base">Chapter Insights</CardTitle>
       </CardHeader>
       <CardContent>

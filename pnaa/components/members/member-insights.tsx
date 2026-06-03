@@ -110,8 +110,8 @@ export function MemberInsights() {
   if (!authLoading && !isAdmin) return null;
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
+    <Card className="gap-3">
+      <CardHeader>
         <CardTitle className="text-base">Member Insights</CardTitle>
       </CardHeader>
       <CardContent>
