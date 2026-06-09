@@ -87,3 +87,18 @@ export const supabase = new Proxy({} as SupabaseClient, {
 });
 export const auth = supabase;
 export const db = supabase;
+
+// Retain the load-bearing exports above in PRODUCTION builds.
+//
+// The dev server (Turbopack) never tree-shakes, so the unused `supabase`/`auth`/
+// `db` exports — and the top-level `new Proxy(...)` evaluation they carry — stay
+// put and everything works locally. But `next build` (webpack + terser) does
+// eliminate zero-caller exports, which dropped the Proxy on Vercel and
+// reintroduced the exact hang we bisected: the Realtime WebSocket connects but
+// every REST/`getSession()` call hangs forever, so no data ever loads.
+//
+// This live reference makes the bindings reachable at runtime, so the optimizer
+// is forced to keep them (and run the `new Proxy(...)` side effect) in prod too.
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__sbKeep = { supabase, auth, db };
+}
