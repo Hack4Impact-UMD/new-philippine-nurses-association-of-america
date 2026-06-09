@@ -68,11 +68,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange(
-      async (_event: string, session: { user: SupabaseUser } | null) => {
+      (_event: string, session: { user: SupabaseUser } | null) => {
         const sbUser = session?.user ?? null;
         setAuthUser(sbUser);
-        await loadProfile(sbUser);
-        setIsLoading(false);
+        // CRITICAL: do NOT await Supabase calls directly in this callback.
+        // onAuthStateChange runs while supabase-js holds the auth lock, and
+        // loadProfile issues a `from(...).select()` that needs the same lock —
+        // awaiting it here deadlocks getSession() and every REST call forever
+        // (Realtime still connects, so it looks like a silent data outage).
+        // Defer the work to a fresh task so the lock is released first.
+        setTimeout(() => {
+          loadProfile(sbUser).finally(() => setIsLoading(false));
+        }, 0);
       }
     );
 
