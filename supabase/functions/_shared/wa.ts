@@ -151,10 +151,13 @@ export async function flushPendingChapters(
 ): Promise<void> {
   const pending = resolver.pendingChapters();
   if (pending.length === 0) return;
-  await supabase.from("chapters").upsert(
+  const { error } = await supabase.from("chapters").upsert(
     pending.map((c) => ({ id: c.id, name: c.name, region: c.region })),
     { onConflict: "id" },
   );
+  // Fail loudly: a swallowed error here leaves member/event inserts to fail
+  // later with opaque FK violations against the chapters that never landed.
+  if (error) throw error;
 }
 
 export async function fetchWAEvent(

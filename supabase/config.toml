@@ -1,4 +1,4 @@
-project_id = "pnaa-chapter-management"
+project_id = "pnaa"
 
 [api]
 enabled = true

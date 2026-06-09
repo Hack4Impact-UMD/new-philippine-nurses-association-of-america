@@ -7,10 +7,6 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "*.wildapricot.org",
       },
-      {
-        protocol: "https",
-        hostname: "firebasestorage.googleapis.com",
-      },
     ],
   },
 };

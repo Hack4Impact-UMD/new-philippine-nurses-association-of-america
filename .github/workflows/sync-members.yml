@@ -19,7 +19,9 @@ jobs:
 
       - name: Install scripts deps
         working-directory: scripts
-        run: npm ci
+        # --omit=dev skips firebase-admin (only used by the one-shot migrate.ts).
+        # The nightly sync needs only @supabase/supabase-js, dotenv, and tsx.
+        run: npm ci --omit=dev
 
       - name: Run sync-members
         working-directory: scripts
