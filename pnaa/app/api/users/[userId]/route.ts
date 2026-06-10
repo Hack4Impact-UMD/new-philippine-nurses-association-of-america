@@ -32,9 +32,36 @@ export async function PATCH(
   if (!VALID_ROLES.includes(role)) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }
+  // The client validates these too, but the API is the boundary: a
+  // chapter_admin without a chapter passes is_admin() yet can write nowhere,
+  // and a region_admin without a region can't match any rows.
+  if (role === "chapter_admin" && !chapterId) {
+    return NextResponse.json(
+      { error: "chapter_admin requires a chapterId" },
+      { status: 400 }
+    );
+  }
+  if (role === "region_admin" && !region) {
+    return NextResponse.json(
+      { error: "region_admin requires a region" },
+      { status: 400 }
+    );
+  }
 
   try {
     const admin = supabaseAdmin();
+
+    if (chapterId) {
+      const { data: chapterRow } = await admin
+        .from("chapters")
+        .select("id")
+        .eq("id", chapterId)
+        .maybeSingle();
+      if (!chapterRow) {
+        return NextResponse.json({ error: "Unknown chapter" }, { status: 400 });
+      }
+    }
+
     const { error: dbErr } = await admin
       .from("users")
       .update({
@@ -57,6 +84,23 @@ export async function PATCH(
       },
     });
     if (claimsErr) throw claimsErr;
+
+    // RLS reads the role from the JWT, so a demoted admin keeps their old
+    // privileges until their access token expires. Kill the user's sessions
+    // when any claim changed — they re-auth and pick up the new claims. The
+    // already-issued access token stays valid until its exp (~1h ceiling).
+    const claimsChanged =
+      prevMeta.user_role !== role ||
+      (prevMeta.chapter_id ?? null) !== (chapterId ?? null) ||
+      (prevMeta.region ?? null) !== (region ?? null);
+    if (claimsChanged) {
+      const { error: revokeErr } = await admin.rpc("revoke_user_sessions", {
+        p_user_id: userId,
+      });
+      if (revokeErr) {
+        console.error("Failed to revoke sessions after role change:", revokeErr);
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

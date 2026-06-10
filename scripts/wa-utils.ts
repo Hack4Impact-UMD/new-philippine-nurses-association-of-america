@@ -155,6 +155,22 @@ export class ChapterResolver {
 
 // ---------- Member mapping ----------
 
+/**
+ * Single JS-side definition of Active vs Lapsed. Must stay in semantic parity
+ * with the SQL `public.is_renewal_active()` (migration 20260517000001), which
+ * the pg_cron nightly job and chapter-aggregate RPC use: a date-only string
+ * parses to midnight UTC in both `new Date()` and `::timestamptz` (DB is UTC),
+ * and the member counts as Active through that instant.
+ */
+export function isRenewalActive(
+  renewalDueDate: string | null | undefined,
+  now: Date = new Date()
+): boolean {
+  if (!renewalDueDate) return false;
+  const due = new Date(renewalDueDate);
+  return !Number.isNaN(due.getTime()) && due >= now;
+}
+
 export type MemberData = {
   id: string;
   contactId: string;
@@ -185,8 +201,9 @@ export function mapContactToMember(
 
   const now = new Date();
   const renewalDueDate = extractFieldValue(fieldValues, "Renewal due");
-  const activeStatus: "Active" | "Lapsed" =
-    renewalDueDate && new Date(renewalDueDate) >= now ? "Active" : "Lapsed";
+  const activeStatus: "Active" | "Lapsed" = isRenewalActive(renewalDueDate, now)
+    ? "Active"
+    : "Lapsed";
   const memberId = extractFieldValue(fieldValues, "Member ID") || String(contact.Id);
   const membershipLevel =
     contact.MembershipLevel &&

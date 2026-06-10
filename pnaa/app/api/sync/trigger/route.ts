@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin, getCaller } from "@/lib/supabase/server";
 
 /**
@@ -25,6 +25,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const secret = process.env.WEBHOOK_SECRET;
+    if (type === "events" && !secret) {
+      console.error("Sync trigger: WEBHOOK_SECRET is not set");
+      return NextResponse.json(
+        { error: "Server misconfigured: WEBHOOK_SECRET is not set" },
+        { status: 500 }
+      );
+    }
+
     const admin = supabaseAdmin();
     await admin.from("sync_logs").insert({
       type,
@@ -41,13 +50,24 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Fire-and-forget the events Edge Function. We don't await the response
-    // because the function may take a few minutes to complete.
+    // Dispatch the events Edge Function inside after() — a bare fire-and-forget
+    // fetch gets killed when the serverless function freezes on response. The
+    // Edge Function acks with 202 immediately and runs the sync via
+    // EdgeRuntime.waitUntil, so this await is quick.
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/sync-events?key=${encodeURIComponent(
-      process.env.WEBHOOK_SECRET ?? ""
+      secret!
     )}`;
-    fetch(url, { method: "POST" }).catch((err) => {
-      console.error("sync-events trigger failed:", err);
+    after(async () => {
+      try {
+        const res = await fetch(url, { method: "POST" });
+        if (!res.ok) {
+          console.error(
+            `sync-events trigger returned ${res.status}: ${await res.text()}`
+          );
+        }
+      } catch (err) {
+        console.error("sync-events trigger failed:", err);
+      }
     });
 
     return NextResponse.json({

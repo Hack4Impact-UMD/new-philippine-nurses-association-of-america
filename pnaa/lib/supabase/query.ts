@@ -206,6 +206,36 @@ export function warnIfHitMaxRows(table: string, count: number): void {
   }
 }
 
+/**
+ * Comparator mirroring the query's orderBy constraints, for keeping
+ * realtime-patched arrays in query order. Nulls sort last on asc / first on
+ * desc, matching Postgres defaults. String comparison is locale-based, which
+ * can differ from the DB collation on edge cases — close enough for live
+ * patching (a refetch restores exact order).
+ */
+export function compareRows(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  orderBys: OrderByConstraint[]
+): number {
+  for (const ob of orderBys) {
+    const av = a[ob.field];
+    const bv = b[ob.field];
+    let cmp = 0;
+    if (av == null && bv == null) cmp = 0;
+    else if (av == null) cmp = 1;
+    else if (bv == null) cmp = -1;
+    else if (typeof av === "number" && typeof bv === "number") {
+      cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    } else {
+      cmp = String(av).localeCompare(String(bv));
+    }
+    if (ob.direction === "desc") cmp = -cmp;
+    if (cmp !== 0) return cmp;
+  }
+  return 0;
+}
+
 /** Predicate that mirrors a where constraint on a hydrated row, for client-side filtering. */
 export function rowMatches(row: Record<string, unknown>, constraints: QueryConstraint[]): boolean {
   for (const c of constraints) {

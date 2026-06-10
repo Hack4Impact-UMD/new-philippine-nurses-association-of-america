@@ -15,6 +15,27 @@ import { supabaseAdmin } from "@/lib/supabase/server";
  *      so the JWT carries them for RLS.
  *   5. Generate + redeem a magic-link token_hash to set sb-* cookies.
  */
+/** Paginated scan of auth.users by email. Fallback only — O(all users). */
+async function findAuthUserByEmail(
+  admin: ReturnType<typeof supabaseAdmin>,
+  emailLower: string
+): Promise<string | undefined> {
+  const LIST_PER_PAGE = 1000;
+  for (let page = 1; ; page++) {
+    const { data, error: listErr } = await admin.auth.admin.listUsers({
+      page,
+      perPage: LIST_PER_PAGE,
+    });
+    if (listErr) throw listErr;
+    const match = data.users.find(
+      (u: { id: string; email?: string | null }) =>
+        u.email?.toLowerCase() === emailLower
+    );
+    if (match) return match.id;
+    if (data.users.length < LIST_PER_PAGE) return undefined;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
@@ -44,26 +65,19 @@ export async function GET(request: NextRequest) {
 
     const admin = supabaseAdmin();
 
-    // (#1) Find existing auth.users by email — paginate through every page,
-    // not just the first 200. listUsers caps perPage at 1000.
+    // Find the existing user via public.users (mirrors auth emails: trigger on
+    // signup + update on every login). One indexed lookup instead of paging
+    // the entire auth user list on every sign-in. ilike with wildcards escaped
+    // = case-insensitive equality.
+    const emailPattern = emailLower.replace(/[\\%_]/g, (m) => `\\${m}`);
     let authUserId: string | undefined;
-    const LIST_PER_PAGE = 1000;
-    for (let page = 1; ; page++) {
-      const { data, error: listErr } = await admin.auth.admin.listUsers({
-        page,
-        perPage: LIST_PER_PAGE,
-      });
-      if (listErr) throw listErr;
-      const match = data.users.find(
-        (u: { id: string; email?: string | null }) =>
-          u.email?.toLowerCase() === emailLower
-      );
-      if (match) {
-        authUserId = match.id;
-        break;
-      }
-      if (data.users.length < LIST_PER_PAGE) break;
-    }
+    const { data: mirrored } = await admin
+      .from("users")
+      .select("id")
+      .ilike("email", emailPattern)
+      .limit(1)
+      .maybeSingle();
+    authUserId = (mirrored as { id: string } | null)?.id;
 
     if (!authUserId) {
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
@@ -71,8 +85,15 @@ export async function GET(request: NextRequest) {
         email_confirm: true,
         user_metadata: { displayName },
       });
-      if (createErr) throw createErr;
-      authUserId = created.user?.id;
+      if (createErr) {
+        // The auth user exists but the public.users mirror missed it (stale
+        // mirror, or a concurrent first login won the createUser race). Fall
+        // back to scanning auth.users by email — cold path only.
+        authUserId = await findAuthUserByEmail(admin, emailLower);
+        if (!authUserId) throw createErr;
+      } else {
+        authUserId = created.user?.id;
+      }
     }
     if (!authUserId) throw new Error("Could not resolve auth user");
 

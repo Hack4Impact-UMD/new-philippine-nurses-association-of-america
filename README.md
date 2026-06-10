@@ -157,7 +157,9 @@ Authentication uses Wild Apricot OAuth 2.0 to identify users, then exchanges a S
    → POST /api/auth/setup updates public.users and app_metadata
    → Redirects to /dashboard
 5. Protected routes:
-   → middleware.ts refreshes the session and gates protected prefixes
+   → middleware.ts gates protected prefixes via getSession() — a local cookie
+     decode that refreshes tokens only when expired. The redirect gate trusts
+     the (unverified) cookie; RLS is the actual data-access enforcement.
    → API routes call getCaller() which reads the session via @supabase/ssr
    → OnboardingGuard in app layout redirects to /setup if needsOnboarding
 ```
@@ -408,7 +410,7 @@ supabase functions deploy wild-apricot-webhook
 
 | Job | Trigger | Description |
 |---|---|---|
-| `sync-events` Edge Function | HTTP (POST, manual) | Full event sync. Insert-only for new events (never overwrites app fields); for every event, diffs WA registrations against the `attendees` table preserving `attended`/`hours` on existing rows. Refreshes `registrations`, `attendees`, `incompleteRegistrations`, `totalRevenue`. Secured with `?key=<WEBHOOK_SECRET>`. |
+| `sync-events` Edge Function | HTTP (POST, manual) | Full event sync. Acks immediately with `202` and runs in the background (`EdgeRuntime.waitUntil`) — results land in the function logs and `sync_logs`. Insert-only for new events (never overwrites app fields); for every event, diffs WA registrations against the `attendees` table preserving `attended`/`hours` on existing rows. Refreshes `registrations`, `attendees`, `incompleteRegistrations`, `totalRevenue`. Secured with `?key=<WEBHOOK_SECRET>`. |
 | `wild-apricot-webhook` Edge Function | HTTP (POST) | Real-time WA event receiver for Contact / Membership / MembershipRenewed / Event / EventRegistration. Upserts members + chapter aggregates, inserts new events (insert-only), syncs attendee rows preserving admin fields. Out-of-order registrations are queued in `pending_registrations`. Always returns 200. |
 | `scripts/sync-members.ts` (GitHub Actions) | Cron (nightly 02:00 ET) + manual `workflow_dispatch` | Full member sync from WA. Runs in GitHub Actions because WA's contact-job poll can take 5–8 minutes (above the Edge Functions 400s ceiling). Diff-aware upsert — only rows whose tracked fields changed are written. Rebuilds chapter aggregates from the WA snapshot. |
 | `public.update_member_status()` (pg_cron) | Daily 02:00 ET | SQL function that flips `activeStatus` based on `renewalDueDate` and rebuilds chapter aggregate counts in a single transaction. |

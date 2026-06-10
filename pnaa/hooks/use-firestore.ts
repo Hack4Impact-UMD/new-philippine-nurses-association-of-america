@@ -10,8 +10,10 @@ import { getSupabaseBrowser } from "@/lib/supabase/client";
 import {
   applyConstraints,
   buildRealtimeFilter,
+  compareRows,
   rowMatches,
   warnIfHitMaxRows,
+  type OrderByConstraint,
   type QueryConstraint,
 } from "@/lib/supabase/query";
 import { hydrateTimestamps } from "@/lib/supabase/timestamp";
@@ -165,8 +167,6 @@ export function useCollection<T>(
           old: Record<string, unknown> | null;
         }) => {
           if (cancelled) return;
-          // Easiest correct path: refetch. The collections in this app are
-          // small (max ~hundreds of rows in a view) and refetch is cheap.
           if (payload.eventType === "DELETE") {
             const id = (payload.old as { id?: string } | null)?.id;
             if (id) setData((cur) => cur.filter((r) => (r as { id: string }).id !== id));
@@ -180,12 +180,23 @@ export function useCollection<T>(
             if (id) setData((cur) => cur.filter((r) => (r as { id: string }).id !== id));
             return;
           }
+          // With a limit, a patched array can't represent the true page (a new
+          // row may displace another that we don't hold) — refetch instead.
+          if (constraintsRef.current.some((c) => c.__kind === "limit")) {
+            fetchOnce();
+            return;
+          }
+          const orderBys = constraintsRef.current.filter(
+            (c): c is OrderByConstraint => c.__kind === "orderBy"
+          );
           const hydrated = hydrateTimestamps({ ...next, id: (next as { id: string }).id }) as T & { id: string };
           setData((cur) => {
             const idx = cur.findIndex((r) => (r as { id: string }).id === hydrated.id);
-            if (idx === -1) return [...cur, hydrated];
             const copy = cur.slice();
-            copy[idx] = hydrated;
+            if (idx === -1) copy.push(hydrated);
+            else copy[idx] = hydrated;
+            // Keep query order — the changed/added row may belong elsewhere.
+            if (orderBys.length > 0) copy.sort((a, b) => compareRows(a, b, orderBys));
             return copy;
           });
         }

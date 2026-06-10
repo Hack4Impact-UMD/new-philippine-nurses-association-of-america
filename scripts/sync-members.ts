@@ -12,6 +12,7 @@ import {
   getWAToken,
   getWAAccountId,
   mapContactToMember,
+  isRenewalActive,
   ChapterResolver,
   getEnv,
   type MemberData,
@@ -195,8 +196,7 @@ async function main() {
       chapterCounts[m.chapterId] = { totalMembers: 0, totalActive: 0, totalLapsed: 0 };
     }
     chapterCounts[m.chapterId].totalMembers++;
-    const isActive = m.renewalDueDate && new Date(m.renewalDueDate) >= now;
-    if (isActive) chapterCounts[m.chapterId].totalActive++;
+    if (isRenewalActive(m.renewalDueDate, now)) chapterCounts[m.chapterId].totalActive++;
     else chapterCounts[m.chapterId].totalLapsed++;
   }
 

@@ -362,8 +362,13 @@ export async function getDocs(q: {
   };
 }
 
-// writeBatch + increment shims — translate to RPC calls / sequential updates.
-// We expose a Firestore-flavored batch API so existing code keeps working.
+// writeBatch + increment shims.
+//
+// DEPRECATED — do not add new callers. Unlike a real Firestore batch, commit()
+// is NOT atomic: it issues sequential PostgREST writes, so a mid-batch failure
+// leaves earlier writes applied. No callers remain in the codebase (the
+// attendee flows all moved to single-transaction RPCs); multi-row writes that
+// must be atomic belong in a Postgres RPC.
 export function increment(n: number): { __increment: number } {
   return { __increment: n };
 }
@@ -409,8 +414,8 @@ export function writeBatch(): {
         );
         const prepared = prepareForWrite(data);
         if (hasIncrement) {
-          // Read-modify-write fallback (no transaction). Acceptable for the
-          // app-managed batches in attendees.ts which are small and per-event.
+          // Read-modify-write fallback (no transaction) — racy on top of the
+          // non-atomic commit; another reason this shim is deprecated.
           const { data: existing } = await supabase
             .from(op.table)
             .select("*")

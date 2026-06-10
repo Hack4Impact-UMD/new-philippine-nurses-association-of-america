@@ -35,6 +35,23 @@ export function extractFieldValue(
   return String(f.Value);
 }
 
+/**
+ * Single JS-side definition of Active vs Lapsed (mirrors scripts/wa-utils.ts).
+ * Must stay in semantic parity with the SQL `public.is_renewal_active()`
+ * (migration 20260517000001), which the pg_cron nightly job and the
+ * chapter-aggregate RPC use: a date-only string parses to midnight UTC in both
+ * `new Date()` and `::timestamptz` (DB is UTC), and the member counts as
+ * Active through that instant.
+ */
+export function isRenewalActive(
+  renewalDueDate: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!renewalDueDate) return false;
+  const due = new Date(renewalDueDate);
+  return !Number.isNaN(due.getTime()) && due >= now;
+}
+
 export function chapterSlug(name: string): string {
   return name
     .toLowerCase()

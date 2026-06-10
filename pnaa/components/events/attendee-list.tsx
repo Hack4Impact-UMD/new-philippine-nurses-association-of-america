@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   collection,
   getDocs,
@@ -176,6 +176,17 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       rows.map((r) => (r.id === id ? { ...r, ...patch } : r))
     );
 
+  // The `row` a cell handler closes over can be stale after rapid successive
+  // edits — capture rollback state from the latest rows instead.
+  const waRowsRef = useRef(waRows);
+  waRowsRef.current = waRows;
+  const manualRowsRef = useRef(manualRows);
+  manualRowsRef.current = manualRows;
+  const currentRow = (row: AttendeeRow): AttendeeRow =>
+    (row.source === "app" ? manualRowsRef : waRowsRef).current.find(
+      (r) => r.id === row.id
+    ) ?? row;
+
   const computeNextHours = (row: AttendeeRow, attended: boolean): number => {
     if (!attended) return 0;
     if (event.eventType === "conference") return event.defaultHours ?? 0;
@@ -186,14 +197,15 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     row: AttendeeRow,
     attended: boolean
   ) => {
-    const newHours = computeNextHours(row, attended);
+    const prev = currentRow(row);
+    const newHours = computeNextHours(prev, attended);
     const patch = { attended, hours: newHours };
     if (row.source === "app") patchManualRow(row.id, patch);
     else patchWaRow(row.id, patch);
     try {
       await setAttendance({
         eventId: event.id,
-        attendee: row,
+        attendee: prev,
         attended,
         eventType: event.eventType,
         eventDefaultHours: event.defaultHours ?? 0,
@@ -203,7 +215,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       console.error(err);
       toast.error("Failed to update attendance");
       // Roll back optimistic update.
-      const rollback = { attended: row.attended, hours: row.hours };
+      const rollback = { attended: prev.attended, hours: prev.hours };
       if (row.source === "app") patchManualRow(row.id, rollback);
       else patchWaRow(row.id, rollback);
     }
@@ -214,7 +226,8 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
     subeventId: string,
     attended: boolean
   ) => {
-    const oldArr = row.attendedSubeventIds ?? [];
+    const prev = currentRow(row);
+    const oldArr = prev.attendedSubeventIds ?? [];
     const nextArr = attended
       ? oldArr.includes(subeventId)
         ? oldArr
@@ -241,8 +254,8 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       toast.error("Failed to update sub-event attendance");
       const rollback = {
         attendedSubeventIds: oldArr,
-        hours: row.hours,
-        attended: row.attended,
+        hours: prev.hours,
+        attended: prev.attended,
       };
       if (row.source === "app") patchManualRow(row.id, rollback);
       else patchWaRow(row.id, rollback);
@@ -250,27 +263,31 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
   };
 
   const handleHoursChange = async (row: AttendeeRow, newHours: number) => {
+    const prev = currentRow(row);
     const patch = { hours: newHours };
     if (row.source === "app") patchManualRow(row.id, patch);
     else patchWaRow(row.id, patch);
     try {
       await setAttendeeHours({
         eventId: event.id,
-        attendee: row,
+        attendee: prev,
         newHours,
         user: user?.email || "",
       });
     } catch (err) {
       console.error(err);
       toast.error("Failed to update hours");
-      const rollback = { hours: row.hours };
+      const rollback = { hours: prev.hours };
       if (row.source === "app") patchManualRow(row.id, rollback);
       else patchWaRow(row.id, rollback);
     }
   };
 
+  // Remove flow: the trash button stages the row; the dialog below confirms.
+  const [removeTarget, setRemoveTarget] = useState<AttendeeRow | null>(null);
+
   const handleRemoveManual = async (row: AttendeeRow) => {
-    if (!confirm(`Remove ${row.name} from this event?`)) return;
+    setRemoveTarget(null);
     setManualRows((rows) => rows.filter((r) => r.id !== row.id));
     try {
       await removeManualAttendee({
@@ -540,7 +557,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
                   className="h-7 w-7 text-muted-foreground hover:text-destructive"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleRemoveManual(row.original);
+                    setRemoveTarget(row.original);
                   }}
                   aria-label="Remove attendee"
                 >
@@ -690,6 +707,34 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           onAdded={onManualAdded}
         />
       )}
+
+      <Dialog
+        open={!!removeTarget}
+        onOpenChange={(v) => {
+          if (!v) setRemoveTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remove attendee</DialogTitle>
+            <DialogDescription>
+              Remove {removeTarget?.name} from this event? Their recorded
+              attendance and hours will be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoveTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => removeTarget && handleRemoveManual(removeTarget)}
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {isNational && isAdmin && (
         <BulkAttendanceUpload

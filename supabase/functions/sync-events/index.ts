@@ -133,14 +133,7 @@ async function syncOneEvent(
   return { eventId: evId, ok: false, reason: String(error.message ?? error), missingMembers };
 }
 
-Deno.serve(async (req) => {
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
-  if (!verifyWebhookSecret(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+async function runSync(): Promise<void> {
   try {
     const supabase = getServiceClient();
     const accessToken = await getWAToken();
@@ -231,22 +224,36 @@ Deno.serve(async (req) => {
           missingMemberIds.map((m) => m.contactId).join(", ")
         : null,
     });
-
-    return new Response(
-      JSON.stringify({
-        events: rawEvents.length,
-        newEvents: newRows.length,
-        processed,
-        skipped,
-        missingMemberIds,
-      }),
-      { headers: { "Content-Type": "application/json" } },
-    );
   } catch (err) {
     console.error("sync-events failed:", err);
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    try {
+      await getServiceClient().from("sync_logs").insert({
+        type: "events",
+        status: "failed",
+        error: String((err as Error)?.message ?? err),
+      });
+    } catch { /* best effort */ }
   }
+}
+
+Deno.serve((req) => {
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+  if (!verifyWebhookSecret(req)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Ack immediately and run the sync in the background. Callers (the admin
+  // "trigger sync" route) would otherwise hold a connection open for minutes —
+  // results land in the function logs and the sync_logs table. runSync never
+  // rejects (it catches internally), so a floating promise is safe locally.
+  const work = runSync();
+  (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } })
+    .EdgeRuntime?.waitUntil?.(work);
+
+  return new Response(JSON.stringify({ accepted: true }), {
+    status: 202,
+    headers: { "Content-Type": "application/json" },
+  });
 });

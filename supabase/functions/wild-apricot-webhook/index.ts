@@ -15,6 +15,7 @@ import {
   fetchWARegistration,
   extractFieldValue,
   extractChapterName,
+  isRenewalActive,
   loadResolver,
   flushPendingChapters,
   type ChapterResolver,
@@ -35,7 +36,7 @@ function mapContact(contact: Record<string, unknown>, resolver: ChapterResolver)
   const fields = (contact.FieldValues as Array<{ FieldName: string; Value: unknown }>) ?? [];
   const now = new Date();
   const renewalDueDate = extractFieldValue(fields, "Renewal due");
-  const activeStatus = renewalDueDate && new Date(renewalDueDate) >= now ? "Active" : "Lapsed";
+  const activeStatus = isRenewalActive(renewalDueDate, now) ? "Active" : "Lapsed";
   const memberId = extractFieldValue(fields, "Member ID") || String(contact.Id);
   const membershipLevel =
     contact.MembershipLevel && typeof contact.MembershipLevel === "object" &&
@@ -190,12 +191,10 @@ async function handleEventRegistration(
   const reg = await fetchWARegistration(accessToken, accountId, registrationId);
   if (!reg) return;
 
-  const { data: existing } = await supabase
-    .from("attendees")
-    .select("attended, hours")
-    .eq("id", registrationId)
-    .maybeSingle();
-
+  // attended/hours are admin-managed and intentionally absent from this
+  // payload: PostgREST upserts only the provided columns, so on conflict they
+  // stay untouched (and on insert they take the column defaults false/0).
+  // The previous read-then-upsert raced with admin toggles and clobbered them.
   const { error: upsertErr } = await supabase.from("attendees").upsert(
     {
       id: registrationId,
@@ -204,8 +203,6 @@ async function handleEventRegistration(
       contactId: reg.contactId,
       memberId: reg.contactId,
       name: reg.name,
-      attended: (existing as { attended?: boolean } | null)?.attended ?? false,
-      hours: (existing as { hours?: number } | null)?.hours ?? 0,
       source: "wildapricot",
       registrationTypeId: reg.registrationTypeId,
       registrationType: reg.registrationType,
