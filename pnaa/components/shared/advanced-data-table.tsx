@@ -17,6 +17,7 @@ import {
   type ColumnSizingState,
   type Header,
   type FilterFn,
+  type OnChangeFn,
 } from "@tanstack/react-table";
 import {
   DndContext,
@@ -148,6 +149,15 @@ interface AdvancedDataTableProps<T> {
   defaultColumnFilters?: ColumnFiltersState;
   exportFilename?: string;
   getRowId?: (row: T) => string;
+  /**
+   * Server-driven sorting: with manualSorting the table never reorders rows
+   * itself — header clicks just update the (controlled) sorting state, and the
+   * caller refetches in that order. Required for server-paginated lists, where
+   * client sorting would reorder only the visible page.
+   */
+  manualSorting?: boolean;
+  sorting?: SortingState;
+  onSortingChange?: OnChangeFn<SortingState>;
 }
 
 // Using `any` for the header generic to avoid JSX generic syntax issues in .tsx
@@ -395,8 +405,12 @@ export function AdvancedDataTable<T extends object>({
   onSelectionChange,
   defaultColumnFilters,
   exportFilename = "export",
+  manualSorting = false,
+  sorting: controlledSorting,
+  onSortingChange,
 }: AdvancedDataTableProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [internalSorting, setInternalSorting] = useState<SortingState>([]);
+  const sorting = controlledSorting ?? internalSorting;
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
     defaultColumnFilters ?? [],
   );
@@ -504,7 +518,8 @@ export function AdvancedDataTable<T extends object>({
       }
       return String(row);
     },
-    onSortingChange: setSorting,
+    manualSorting,
+    onSortingChange: onSortingChange ?? setInternalSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
