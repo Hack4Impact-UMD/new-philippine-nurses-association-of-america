@@ -15,7 +15,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 22+ ships a native WebSocket, which @supabase/supabase-js's
+          # RealtimeClient now requires at construction time (even though this
+          # script only uses PostgREST, not Realtime). Node 20 throws on createClient.
+          node-version: "22"
 
       - name: Install scripts deps
         working-directory: scripts
