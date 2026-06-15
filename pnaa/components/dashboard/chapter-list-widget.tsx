@@ -35,19 +35,18 @@ export function ChapterListWidget({
   const [mode, setMode] = useState<SortMode>("largest");
 
   const top = useMemo(() => {
-    const sorted = [...chapters];
     if (mode === "largest") {
-      sorted.sort((a, b) => b.totalMembers - a.totalMembers);
-    } else {
-      // Surface chapters bleeding members. Ignore tiny chapters where a single
-      // lapse swings the percentage by requiring a small membership floor.
-      sorted.sort((a, b) => {
-        const aRisk = a.totalMembers >= 5 ? lapsedPct(a) : -1;
-        const bRisk = b.totalMembers >= 5 ? lapsedPct(b) : -1;
-        return bRisk - aRisk;
-      });
+      return [...chapters]
+        .sort((a, b) => b.totalMembers - a.totalMembers)
+        .slice(0, 10);
     }
-    return sorted.slice(0, 10);
+    // Surface chapters bleeding members. Exclude tiny chapters where a single
+    // lapse swings the percentage by requiring a small membership floor — they
+    // shouldn't appear even when fewer than 10 eligible chapters exist.
+    return [...chapters]
+      .filter((c) => c.totalMembers >= 5)
+      .sort((a, b) => lapsedPct(b) - lapsedPct(a))
+      .slice(0, 10);
   }, [chapters, mode]);
 
   return (
@@ -65,6 +64,7 @@ export function ChapterListWidget({
               <button
                 key={m}
                 type="button"
+                aria-pressed={mode === m}
                 onClick={() => setMode(m)}
                 className={cn(
                   "rounded px-2 py-1 font-medium transition-colors",

@@ -53,7 +53,10 @@ export default function DashboardPage() {
   const today = new Date().toISOString().split("T")[0];
 
   // National/region admins see the org or region; everyone else is chapter-scoped.
-  const chapterScoped = !isNationalAdmin && !isRegionAdmin && !!userChapter;
+  const chapterScoped = !isNationalAdmin && !isRegionAdmin;
+  // Region admins filter by region client-side (events/campaigns carry no region
+  // column), so they must fetch a wider window than the 6 they ultimately show.
+  const regionScoped = isRegionAdmin && !!userRegion;
 
   const { data: chapters } = useCollection<Chapter>("chapters");
 
@@ -64,12 +67,18 @@ export default function DashboardPage() {
       where("archived", "==", false),
       where("startDate", ">=", today),
     ];
-    if (chapterScoped && userChapter) {
-      c.push(where("chapterId", "==", userChapter));
+    if (chapterScoped) {
+      // Chapter-restricted users must never fall through to org-wide data. If
+      // their chapter context is missing, a sentinel id yields no rows rather
+      // than an unscoped fetch.
+      c.push(where("chapterId", "==", userChapter || "__no_chapter__"));
     }
-    c.push(orderBy("startDate", "asc"), limit(chapterScoped ? 6 : 25));
+    c.push(
+      orderBy("startDate", "asc"),
+      limit(chapterScoped ? 6 : regionScoped ? 100 : 25)
+    );
     return c;
-  }, [today, chapterScoped, userChapter]);
+  }, [today, chapterScoped, regionScoped, userChapter]);
   const { data: upcomingEventsRaw } = useCollection<AppEvent>(
     "events",
     eventConstraints
@@ -77,12 +86,15 @@ export default function DashboardPage() {
 
   const campaignConstraints = useMemo(() => {
     const c: QueryConstraint[] = [where("archived", "==", false)];
-    if (chapterScoped && userChapter) {
-      c.push(where("chapterId", "==", userChapter));
+    if (chapterScoped) {
+      c.push(where("chapterId", "==", userChapter || "__no_chapter__"));
     }
-    c.push(orderBy("date", "desc"), limit(chapterScoped ? 6 : 25));
+    c.push(
+      orderBy("date", "desc"),
+      limit(chapterScoped ? 6 : regionScoped ? 100 : 25)
+    );
     return c;
-  }, [chapterScoped, userChapter]);
+  }, [chapterScoped, regionScoped, userChapter]);
   const { data: campaignsRaw } = useCollection<FundraisingCampaign>(
     "fundraising",
     campaignConstraints

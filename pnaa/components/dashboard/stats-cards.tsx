@@ -108,13 +108,25 @@ export function StatsCards({
   stats: DashboardStats | null;
   loading: boolean;
 }) {
-  if (loading || !stats) {
+  if (loading) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <StatCardSkeleton key={i} />
         ))}
       </div>
+    );
+  }
+
+  // Loading finished but stats never arrived — the RPC failed. Show an error
+  // state instead of skeletons, which would otherwise spin forever.
+  if (!stats) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Couldn&apos;t load dashboard stats. Please refresh to try again.
+        </CardContent>
+      </Card>
     );
   }
 

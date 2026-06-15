@@ -55,7 +55,9 @@ export function RecentFundraising({
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {chapterName}
-                      {campaign.date && ` · ${formatDate(campaign.date)}`}
+                      {chapterName &&
+                        campaign.date &&
+                        ` · ${formatDate(campaign.date)}`}
                     </p>
                   </div>
                   <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums shrink-0">
