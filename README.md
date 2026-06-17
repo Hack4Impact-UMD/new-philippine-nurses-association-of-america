@@ -554,7 +554,7 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 
 ### What's not optimized yet
 
-- Full-text search across members ("smith" finding "John Smith") could move to Postgres `tsvector` / `pg_trgm` but isn't yet — today only **case-corrected name prefix** searches work.
+- Member search uses a case-insensitive substring match (`ILIKE '%term%'`), so "smith" already finds "John Smith". Fuzzy/typo-tolerant, ranked full-text search (Postgres `tsvector` / `pg_trgm`) isn't implemented yet — the current query is a sequential scan, not index-backed full-text.
 - The `/events` listing fetches up to 500 events per visit (capped); not paginated. Acceptable at current event volume but a future concern.
 
 ---
