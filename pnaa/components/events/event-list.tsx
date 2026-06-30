@@ -11,7 +11,7 @@ import { EventAttendanceChart } from "./event-attendance-chart";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useIsNationalAdmin } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
@@ -22,12 +22,6 @@ type FilterMode = "upcoming" | "past" | "all";
 type EventRow = AppEvent & { id: string };
 
 const STORAGE_KEY = "pnaa-events-view";
-const PAGE_SIZE = 25;
-
-/** Escape LIKE wildcards in user input. */
-function escapeLike(s: string): string {
-  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
-}
 
 /**
  * Builds column defs. The chapter / region cells need the chapters lookup,
@@ -43,6 +37,7 @@ function buildColumns(
     header: "Event Name",
     size: 260,
     enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
     cell: ({ row }) => (
       <span className="font-medium text-sm line-clamp-2 leading-snug">
         {row.original.name}
@@ -81,6 +76,7 @@ function buildColumns(
     header: "Chapter",
     size: 180,
     enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
     cell: ({ row }) => (
       <span className="text-sm">{nameFor(row.original.chapterId) || "—"}</span>
     ),
@@ -90,6 +86,7 @@ function buildColumns(
     header: "Region",
     size: 140,
     enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
     accessorFn: (row) => regionFor(row.chapterId),
     cell: ({ row }) => (
       <span className="text-sm text-muted-foreground">{regionFor(row.original.chapterId)}</span>
@@ -100,6 +97,7 @@ function buildColumns(
     header: "Location",
     size: 180,
     enableSorting: true,
+    meta: { filterType: "text" } satisfies ColumnMeta,
     cell: ({ row }) => (
       <span className="text-sm text-muted-foreground truncate block max-w-[170px]">
         {row.original.location || "—"}
@@ -237,14 +235,11 @@ export function EventList() {
     return "table";
   });
 
-  // Paginated query state
-  const [page, setPage] = useState(0);
   const [rows, setRows] = useState<EventRow[]>([]);
-  const [total, setTotal] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // stays true until first fetch resolves
 
-  // Chart data: always the last 12 months of active events, independent of
-  // the current filter/page so the attendance trend is never clipped.
+  // Chart data: always the last 12 months of active events, independent of the
+  // current filter mode so the attendance trend is never clipped.
   const [chartEvents, setChartEvents] = useState<(AppEvent & { id: string })[]>([]);
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
@@ -254,19 +249,13 @@ export function EventList() {
     return d.toISOString().split("T")[0];
   }, []);
 
-  // Reset to page 0 on any filter/search change.
-  const handleSearch = (v: string) => { setSearch(v); setPage(0); };
-  const handleFilterMode = (v: FilterMode) => { setFilterMode(v); setPage(0); };
-  const handleShowArchived = () => { setShowArchived((prev) => !prev); setPage(0); };
-
-  // Main paginated query
+  // Main query — loads all matching events so client-side sort, filter, and
+  // export all operate on the full result set.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     const supabase = getSupabaseBrowser();
-    const trimmed = debouncedSearch.trim();
 
-    let q = supabase.from("events").select("*", { count: "exact" });
+    let q = supabase.from("events").select("*");
 
     if (!showArchived) q = q.eq("archived", false);
 
@@ -278,34 +267,28 @@ export function EventList() {
       q = q.order("startDate", { ascending: false });
     }
 
-    if (trimmed) {
-      // Search by event name or location (ILIKE, backed by the small table size).
-      // Chapter-name search isn't supported server-side; use the date/archived
-      // filters to narrow by chapter context instead.
-      const esc = escapeLike(trimmed);
-      q = q.or(`name.ilike.%${esc}%,location.ilike.%${esc}%`);
-    }
+    q.then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load events", error);
+        setRows([]);
+      } else {
+        setRows((data ?? []).map((d) => ({ ...(d as unknown as AppEvent), id: String((d as Record<string, unknown>).id) })));
+      }
+      setLoading(false);
+    });
 
-    q.order("id", { ascending: true }) // stable tiebreaker for same-date events
-     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
-     .then(({ data, count, error }) => {
-       if (cancelled) return;
-       if (error) {
-         console.error("Failed to load events", error);
-         setRows([]);
-         setTotal(null);
-       } else {
-         setRows((data ?? []).map((d) => ({ ...(d as unknown as AppEvent), id: String((d as Record<string, unknown>).id) })));
-         setTotal(count ?? null);
-       }
-       setLoading(false);
-     });
+    // Cleanup cancels the in-flight request and resets loading so the next
+    // effect (triggered by deps change) shows the loading skeleton.
+    return () => {
+      cancelled = true;
+      setLoading(true);
+    };
+  }, [filterMode, showArchived, today]);
 
-    return () => { cancelled = true; };
-  }, [page, debouncedSearch, filterMode, showArchived, today]);
-
-  // Chart data: one-time fetch, last 12 months, unaffected by pagination.
+  // Chart data: one-time fetch, last 12 months, unaffected by filter mode.
   useEffect(() => {
+    let cancelled = false;
     const supabase = getSupabaseBrowser();
     supabase
       .from("events")
@@ -314,10 +297,12 @@ export function EventList() {
       .gte("startDate", chartCutoff)
       .lte("startDate", today)
       .then(({ data }) => {
+        if (cancelled) return;
         if (data) {
           setChartEvents(data.map((d) => ({ ...(d as unknown as AppEvent), id: String((d as Record<string, unknown>).id) })));
         }
       });
+    return () => { cancelled = true; };
   }, [chartCutoff, today]);
 
   const handleViewChange = (v: ViewMode) => {
@@ -325,8 +310,18 @@ export function EventList() {
     localStorage.setItem(STORAGE_KEY, v);
   };
 
-  const pageCount = total !== null ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : null;
-  const hasMore = total !== null ? (page + 1) * PAGE_SIZE < total : rows.length === PAGE_SIZE;
+  // Card view: client-side search (table view uses globalFilter prop).
+  const filteredForCards = useMemo(() => {
+    if (!debouncedSearch) return rows;
+    const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
+    return rows.filter(
+      (e) =>
+        lc(e.name).includes(q) ||
+        lc(nameFor(e.chapterId)).includes(q) ||
+        lc(e.location).includes(q)
+    );
+  }, [rows, debouncedSearch, nameFor]);
 
   return (
     <div className="space-y-4">
@@ -334,8 +329,8 @@ export function EventList() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SearchInput
           value={search}
-          onChange={handleSearch}
-          placeholder="Search events by name or location..."
+          onChange={setSearch}
+          placeholder="Search events..."
           className="w-full sm:max-w-sm"
         />
         <div className="flex items-center gap-2 flex-wrap">
@@ -344,7 +339,7 @@ export function EventList() {
             {(["upcoming", "past", "all"] as FilterMode[]).map((mode) => (
               <button
                 key={mode}
-                onClick={() => handleFilterMode(mode)}
+                onClick={() => setFilterMode(mode)}
                 className={`rounded-full px-3 py-1 text-sm font-medium transition-all ${
                   filterMode === mode
                     ? "bg-background text-foreground shadow-sm"
@@ -358,7 +353,7 @@ export function EventList() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={handleShowArchived}
+            onClick={() => setShowArchived((prev) => !prev)}
             className={showArchived ? "text-primary" : "text-muted-foreground"}
           >
             {showArchived ? "Hide Archived" : "Show Archived"}
@@ -374,11 +369,12 @@ export function EventList() {
           columns={columns}
           data={rows}
           loading={loading}
+          globalFilter={debouncedSearch}
           onRowClick={(event) => router.push(`/events/${event.id}`)}
           emptyTitle="No events found"
           emptyDescription="No events match the current filter"
           emptyIcon={Calendar}
-          defaultPageSize={PAGE_SIZE}
+          defaultPageSize={15}
           exportFilename="PNAA_events"
         />
       ) : loading ? (
@@ -387,7 +383,7 @@ export function EventList() {
             <div key={i} className="h-48 rounded-lg bg-muted animate-pulse" />
           ))}
         </div>
-      ) : rows.length === 0 ? (
+      ) : filteredForCards.length === 0 ? (
         <EmptyState
           icon={Calendar}
           title="No events found"
@@ -397,44 +393,11 @@ export function EventList() {
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {rows.map((event) => (
+          {filteredForCards.map((event) => (
             <EventCard key={event.id} event={event} />
           ))}
         </div>
       )}
-
-      {/* Pagination controls */}
-      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-        {total !== null && (
-          <span className="tabular-nums">
-            {total.toLocaleString()} event{total !== 1 ? "s" : ""}
-          </span>
-        )}
-        <span className="tabular-nums">
-          Page {page + 1}
-          {pageCount !== null ? ` of ${pageCount.toLocaleString()}` : ""}
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2"
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
-          disabled={page === 0 || loading}
-          aria-label="Previous page"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2"
-          onClick={() => setPage((p) => p + 1)}
-          disabled={!hasMore || loading}
-          aria-label="Next page"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
     </div>
   );
 }
