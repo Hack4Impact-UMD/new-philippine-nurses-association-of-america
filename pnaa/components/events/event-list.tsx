@@ -1,8 +1,7 @@
 "use client";
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useCollection } from "@/hooks/use-firestore";
-import { where, orderBy, limit } from "@/lib/supabase/firestore";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { SearchInput } from "@/components/shared/search-input";
 import { EventCard } from "./event-card";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -13,7 +12,6 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "lucide-react";
-import { toast } from "sonner";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useIsNationalAdmin } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
@@ -89,6 +87,7 @@ function buildColumns(
     size: 140,
     enableSorting: true,
     meta: { filterType: "text" } satisfies ColumnMeta,
+    accessorFn: (row) => regionFor(row.chapterId),
     cell: ({ row }) => (
       <span className="text-sm text-muted-foreground">{regionFor(row.original.chapterId)}</span>
     ),
@@ -236,69 +235,93 @@ export function EventList() {
     return "table";
   });
 
-  const today = new Date().toISOString().split("T")[0];
+  const [rows, setRows] = useState<EventRow[]>([]);
+  const [loading, setLoading] = useState(true); // stays true until first fetch resolves
 
-  const constraints = useMemo(() => {
-    const c = [];
-    if (!showArchived) c.push(where("archived", "==", false));
+  // Chart data: always the last 12 months of active events, independent of the
+  // current filter mode so the attendance trend is never clipped.
+  const [chartEvents, setChartEvents] = useState<(AppEvent & { id: string })[]>([]);
+
+  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const chartCutoff = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 12);
+    return d.toISOString().split("T")[0];
+  }, []);
+
+  // Main query — loads all matching events so client-side sort, filter, and
+  // export all operate on the full result set.
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = getSupabaseBrowser();
+
+    let q = supabase.from("events").select("*");
+
+    if (!showArchived) q = q.eq("archived", false);
+
     if (filterMode === "upcoming") {
-      c.push(where("startDate", ">=", today));
-      c.push(orderBy("startDate", "asc"));
+      q = q.gte("startDate", today).order("startDate", { ascending: true });
     } else if (filterMode === "past") {
-      c.push(where("startDate", "<", today));
-      c.push(orderBy("startDate", "desc"));
+      q = q.lt("startDate", today).order("startDate", { ascending: false });
     } else {
-      c.push(orderBy("startDate", "desc"));
+      q = q.order("startDate", { ascending: false });
     }
-    c.push(limit(500));
-    return c;
+
+    q.then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load events", error);
+        setRows([]);
+      } else {
+        setRows((data ?? []).map((d) => ({ ...(d as unknown as AppEvent), id: String((d as Record<string, unknown>).id) })));
+      }
+      setLoading(false);
+    });
+
+    // Cleanup cancels the in-flight request and resets loading so the next
+    // effect (triggered by deps change) shows the loading skeleton.
+    return () => {
+      cancelled = true;
+      setLoading(true);
+    };
   }, [filterMode, showArchived, today]);
 
-  const { data: events, loading } = useCollection<AppEvent>("events", constraints);
-  const data = events as EventRow[];
-
-  // Notify if user toggled archived on but there are no archived events.
-  // Use a ref to detect when loading settles after the toggle was turned on.
-  const justToggledArchived = useRef(false);
+  // Chart data: one-time fetch, last 12 months, unaffected by filter mode.
   useEffect(() => {
-    if (showArchived) {
-      justToggledArchived.current = true;
-    } else {
-      justToggledArchived.current = false;
-    }
-  }, [showArchived]);
-
-  useEffect(() => {
-    if (justToggledArchived.current && !loading && data) {
-      if (data.length > 0 && !data.some((e) => e.archived)) {
-        toast.info("No archived events", {
-          description: "All events in this view are currently active.",
-          duration: 3000,
-          classNames: {
-            toast: "bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800",
-            title: "text-blue-700 dark:text-blue-300",
-            description: "text-blue-500 dark:text-blue-400",
-          },
-        });
-      }
-      justToggledArchived.current = false;
-    }  }, [loading, data]);  // Cards view still uses client-side filtering
-  const filteredForCards = useMemo(() => {
-    if (!debouncedSearch) return data;
-    const q = debouncedSearch.toLowerCase();
-    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
-    return data.filter(
-      (e) =>
-        lc(e.name).includes(q) ||
-        lc(nameFor(e.chapterId)).includes(q) ||
-        lc(e.location).includes(q)
-    );
-  }, [data, debouncedSearch, nameFor]);
+    let cancelled = false;
+    const supabase = getSupabaseBrowser();
+    supabase
+      .from("events")
+      .select("id,name,startDate,chapterId,attendees")
+      .eq("archived", false)
+      .gte("startDate", chartCutoff)
+      .lte("startDate", today)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data) {
+          setChartEvents(data.map((d) => ({ ...(d as unknown as AppEvent), id: String((d as Record<string, unknown>).id) })));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [chartCutoff, today]);
 
   const handleViewChange = (v: ViewMode) => {
     setView(v);
     localStorage.setItem(STORAGE_KEY, v);
   };
+
+  // Card view: client-side search (table view uses globalFilter prop).
+  const filteredForCards = useMemo(() => {
+    if (!debouncedSearch) return rows;
+    const q = debouncedSearch.toLowerCase();
+    const lc = (v: string | null | undefined) => (v ?? "").toLowerCase();
+    return rows.filter(
+      (e) =>
+        lc(e.name).includes(q) ||
+        lc(nameFor(e.chapterId)).includes(q) ||
+        lc(e.location).includes(q)
+    );
+  }, [rows, debouncedSearch, nameFor]);
 
   return (
     <div className="space-y-4">
@@ -330,7 +353,7 @@ export function EventList() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowArchived(!showArchived)}
+            onClick={() => setShowArchived((prev) => !prev)}
             className={showArchived ? "text-primary" : "text-muted-foreground"}
           >
             {showArchived ? "Hide Archived" : "Show Archived"}
@@ -339,12 +362,12 @@ export function EventList() {
         </div>
       </div>
 
-      <EventAttendanceChart events={data} loading={loading} />
+      <EventAttendanceChart events={chartEvents} loading={loading && chartEvents.length === 0} />
 
       {view === "table" ? (
         <AdvancedDataTable<EventRow>
           columns={columns}
-          data={data}
+          data={rows}
           loading={loading}
           globalFilter={debouncedSearch}
           onRowClick={(event) => router.push(`/events/${event.id}`)}
