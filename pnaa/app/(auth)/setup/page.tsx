@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/lib/auth/context";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { needsOnboarding } from "@/lib/auth/onboarding";
 import {
   Select,
   SelectContent,
@@ -38,15 +39,18 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Redirect if user doesn't need onboarding
+  // Setup is required until the user's role actually has its scope: a chapter
+  // for members and chapter admins, a region for region admins.
+  const setupRequired = needsOnboarding(user);
+
   useEffect(() => {
-    if (!authLoading && user && !user.needsOnboarding) {
+    if (!authLoading && user && !setupRequired) {
       router.replace("/dashboard");
     }
     if (!authLoading && !user) {
       router.replace("/signin");
     }
-  }, [authLoading, user, router]);
+  }, [authLoading, user, setupRequired, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +119,7 @@ export default function SetupPage() {
     }
   };
 
-  if (authLoading || !user?.needsOnboarding) {
+  if (authLoading || !setupRequired) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />

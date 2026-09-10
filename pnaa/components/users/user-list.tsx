@@ -86,7 +86,10 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
 
   const handleRoleChange = (newRole: UserRole) => {
     setRole(newRole);
-    if (newRole === "national_admin" || newRole === "member") {
+    // Only national admins are org-wide. Every other role keeps its scope —
+    // members are chapter-scoped by RLS just like chapter admins, so clearing
+    // their chapter here used to lock them out of the app entirely.
+    if (newRole === "national_admin") {
       setRegion("");
       setChapterId("");
     }
@@ -105,8 +108,8 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
       toast.error("Please select a region for Region Admin");
       return;
     }
-    if (role === "chapter_admin" && !chapterId) {
-      toast.error("Please select a chapter for Chapter Admin");
+    if ((role === "chapter_admin" || role === "member") && !chapterId) {
+      toast.error(`Please select a chapter for ${ROLE_LABELS[role]}`);
       return;
     }
 
@@ -117,9 +120,9 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           role,
-          chapterId: role === "chapter_admin" ? chapterId : null,
-          region:
-            role === "region_admin" || role === "chapter_admin" ? region : null,
+          chapterId:
+            role === "chapter_admin" || role === "member" ? chapterId : null,
+          region: role === "national_admin" ? null : region,
         }),
       });
 
@@ -204,7 +207,7 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
             </Select>
           </div>
 
-          {(role === "region_admin" || role === "chapter_admin") && (
+          {role !== "national_admin" && (
             <div className="space-y-1.5">
               <Label htmlFor="region">Region</Label>
               <Select value={region} onValueChange={setRegion}>
@@ -222,7 +225,7 @@ function EditUserDialog({ user, chapters, onClose }: EditUserDialogProps) {
             </div>
           )}
 
-          {role === "chapter_admin" && (
+          {(role === "chapter_admin" || role === "member") && (
             <div className="space-y-1.5">
               <Label htmlFor="chapter">Chapter</Label>
               <Select value={chapterId} onValueChange={handleChapterChange}>

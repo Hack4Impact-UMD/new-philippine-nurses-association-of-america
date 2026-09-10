@@ -463,11 +463,17 @@ Two helpers carry the whole model, so scope changes happen in one place each:
 | `public.can_read_chapter(chapterId)` | SELECT policies on `events`, `fundraising`, `subchapters`, `attendees`, `chapter_aliases`. `chapters` and `members` inline the same rule to avoid a policy that queries its own table (`chapters`) and a per-row subquery across ~14k rows (`members`). |
 | `public.can_write_chapter(chapterId)` | INSERT/UPDATE policies on `events`, `fundraising`, `subchapters`, `attendees`, plus every event-mutating RPC via `assert_can_write_event()`. |
 
-The `national` chapter is the organization itself rather than someone else's chapter, so its `chapters` row and the events hanging off it (`chapterId = 'national'`, or null for cross-chapter events) stay readable by every authenticated user. Without that carve-out the national conference, its sub-events and its attendee roster would disappear for everyone but national admins.
-
-`/setup` is the one place that needs the full chapter directory: a brand-new user has no chapter scope yet, so `chapters` reads back empty for them. `public.chapter_directory()` is a `SECURITY DEFINER` RPC returning only `id` / `name` / `region` for canonical (non-aliased) chapters — enough to populate the onboarding picker without exposing the aggregate member counts on the table.
+The `national` chapter gets **no carve-out**. Its `chapters` row, its events (`chapterId = 'national'`, plus the null-`chapterId` cross-chapter ones) and their attendees are national-admin-only, exactly like any other chapter a user isn't scoped to. National conferences and their sub-events are therefore invisible to region admins, chapter admins and members.
 
 Defined in [supabase/migrations/20260910000001_scoped_visibility.sql](supabase/migrations/20260910000001_scoped_visibility.sql).
+
+### Onboarding: scope is required to use the app
+
+Because RLS returns a scoped role *nothing* until its scope is set, a user in that state would land on an empty dashboard with no way out. [`lib/auth/onboarding.ts`](pnaa/lib/auth/onboarding.ts) holds the single rule — national admins need nothing, region admins need a `region`, chapter admins and members need a `chapterId` — and the client guard, the `/setup` page, `POST /api/auth/setup` and the OAuth callback redirect all call it, so they can't drift into a redirect loop.
+
+The rule keys off the actual scope, not just the `needsOnboarding` flag, so a user whose chapter is later removed is sent back through setup rather than being stranded. `PATCH /api/users/[userId]` closes the other half: it now rejects a `member` without a `chapterId`, since blanking a member's chapter used to be the main way to strand one.
+
+`/setup` is the one place that needs the full chapter list, and a user without a chapter can't read the `chapters` table. `public.chapter_directory()` is a `SECURITY DEFINER` RPC returning only `id` / `name` / `region`, excluding aliased chapters and `national` — enough to populate the onboarding picker without exposing the aggregate member counts on the table.
 
 Soft deletes are used for events, fundraising, and subchapters (no hard deletes allowed via RLS — records are archived with `archived: true`).
 

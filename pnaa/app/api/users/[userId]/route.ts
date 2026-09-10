@@ -34,10 +34,12 @@ export async function PATCH(
   }
   // The client validates these too, but the API is the boundary: a
   // chapter_admin without a chapter passes is_admin() yet can write nowhere,
-  // and a region_admin without a region can't match any rows.
-  if (role === "chapter_admin" && !chapterId) {
+  // and a region_admin without a region can't match any rows. Members are
+  // chapter-scoped by RLS, so one without a chapter sees an empty app — and
+  // an admin saving this form is how that used to happen.
+  if ((role === "chapter_admin" || role === "member") && !chapterId) {
     return NextResponse.json(
-      { error: "chapter_admin requires a chapterId" },
+      { error: `${role} requires a chapterId` },
       { status: 400 }
     );
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, getCaller } from "@/lib/supabase/server";
+import { needsOnboarding } from "@/lib/auth/onboarding";
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,11 +12,14 @@ export async function POST(request: NextRequest) {
     const admin = supabaseAdmin();
     const { data: userRow, error: selErr } = await admin
       .from("users")
-      .select("needsOnboarding, role")
+      .select("needsOnboarding, role, chapterId, region")
       .eq("id", uid)
       .maybeSingle();
     if (selErr) throw selErr;
-    if (!userRow || !(userRow as { needsOnboarding: boolean }).needsOnboarding) {
+    // Not just the needsOnboarding flag: a user whose chapter was later
+    // removed has the flag cleared but still can't see anything, and setup is
+    // their only way to pick one again.
+    if (!userRow || !needsOnboarding(userRow)) {
       return NextResponse.json({ error: "Setup not required" }, { status: 400 });
     }
 
@@ -28,7 +32,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Sanity-check the chapter exists.
+    // Sanity-check the chapter exists. 'national' is the organization, not a
+    // chapter anyone belongs to, so it's rejected here as well as being left
+    // out of the chapter_directory() picker feed.
+    if (chapterId === "national") {
+      return NextResponse.json(
+        { error: "Select the chapter you belong to" },
+        { status: 400 }
+      );
+    }
     const { data: chapterRow } = await admin
       .from("chapters")
       .select("id")

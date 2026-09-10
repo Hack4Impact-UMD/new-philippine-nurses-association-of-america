@@ -10,11 +10,11 @@
 --   chapter_admin  -> read + write their own chapter only
 --   member         -> read their own chapter only
 --
--- The 'national' chapter is the organization itself rather than "someone
--- else's chapter", so its row — and the national conferences that hang off it
--- — stay readable by every authenticated user. Without that carve-out the
--- national conference, its sub-events and its attendee roster would vanish for
--- everyone except national admins.
+-- The 'national' chapter gets no carve-out: its row, its events and their
+-- attendees are national-admin-only, same as any other chapter a user isn't
+-- scoped to. An event with a null chapterId (national / cross-chapter, see
+-- types/event.ts) is likewise national-admin-only, since can_read_chapter(null)
+-- is true for that role alone.
 
 -- ---------- read scope helper ----------
 -- SECURITY DEFINER so the chapters lookup in the region branch is not itself
@@ -29,7 +29,6 @@ set search_path = public
 as $$
   select
     public.is_national_admin()
-    or p_chapter_id = 'national'
     or (
       public.auth_role() = 'region_admin'
       and p_chapter_id is not null
@@ -80,7 +79,6 @@ drop policy if exists chapters_read on public.chapters;
 create policy chapters_read on public.chapters for select to authenticated
   using (
     public.is_national_admin()
-    or id = 'national'
     or (
       public.auth_role() = 'region_admin'
       and "region" is not distinct from public.auth_region()
@@ -112,12 +110,13 @@ create policy members_read on public.members for select to authenticated
   );
 
 -- ---------- events ----------
--- A null chapterId means national / cross-chapter (see types/event.ts), so it
--- reads as 'national' rather than as an invisible orphan.
+-- A null chapterId (national / cross-chapter) fails every non-national branch
+-- of can_read_chapter, so those events are national-admin-only — as are the
+-- events on the 'national' chapter itself.
 
 drop policy if exists events_read on public.events;
 create policy events_read on public.events for select to authenticated
-  using (public.can_read_chapter(coalesce("chapterId", 'national')));
+  using (public.can_read_chapter("chapterId"));
 
 -- ---------- fundraising ----------
 
@@ -140,7 +139,7 @@ create policy attendees_read on public.attendees for select to authenticated
     exists (
       select 1 from public.events e
       where e.id = attendees."eventId"
-        and public.can_read_chapter(coalesce(e."chapterId", 'national'))
+        and public.can_read_chapter(e."chapterId")
     )
   );
 
@@ -171,8 +170,10 @@ create policy subev_write on public.subevents for all to authenticated
 -- ---------- onboarding chapter directory ----------
 -- /setup asks a brand-new user to pick their region and chapter, but at that
 -- point they have no chapter_id and chapters_read shows them nothing. This
--- returns the picker's rows (id / name / region, aliased chapters excluded)
--- without opening up the aggregate member counts on the table itself.
+-- returns the picker's rows (id / name / region) without opening up the
+-- aggregate member counts on the table itself. Aliased chapters are excluded
+-- (picking one strands the user under a dead chapter) and so is 'national',
+-- which is the organization rather than somewhere a person belongs.
 
 create or replace function public.chapter_directory()
 returns table (id text, "name" text, "region" text)
@@ -183,9 +184,10 @@ set search_path = public
 as $$
   select c.id, c."name", c."region"
   from public.chapters c
-  where not exists (
-    select 1 from public.chapter_aliases a where a."aliasName" = c."name"
-  )
+  where c.id <> 'national'
+    and not exists (
+      select 1 from public.chapter_aliases a where a."aliasName" = c."name"
+    )
   order by c."name";
 $$;
 

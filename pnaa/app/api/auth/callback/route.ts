@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createServerClient, type CookieOptionsWithName } from "@supabase/ssr";
 import { exchangeCodeForToken, getContactInfo } from "@/lib/wild-apricot/oauth";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { needsOnboarding } from "@/lib/auth/onboarding";
 
 /**
  * Wild Apricot OAuth callback → Supabase session.
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
       .eq("id", authUserId)
       .maybeSingle();
 
-    const needsOnboarding =
+    const onboardingFlag =
       (existing as { needsOnboarding?: boolean } | null)?.needsOnboarding ?? true;
     const role: string =
       (existing as { role?: string } | null)?.role ?? "member";
@@ -160,7 +161,9 @@ export async function GET(request: NextRequest) {
     if (!tokenHash) throw new Error("generateLink returned no token_hash");
 
     const response = NextResponse.redirect(
-      needsOnboarding ? `${appUrl}/setup` : `${appUrl}/dashboard`
+      needsOnboarding({ role, chapterId, region, needsOnboarding: onboardingFlag })
+        ? `${appUrl}/setup`
+        : `${appUrl}/dashboard`
     );
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
