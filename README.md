@@ -51,7 +51,7 @@ A full-stack web application for managing PNAA's 55+ chapters, 14,000+ members, 
 - **Advanced Data Tables** — Chapters, Events, and Fundraising pages feature a rich table view with sortable, resizable, and drag-to-reorder columns; per-column filters; column visibility toggles; and pagination. Switchable to a card grid via a pill toggle.
 - **Excel Export** — Tabular data exports to `.xlsx` via ExcelJS for offline analysis
 - **Bulk CSV Upload** — Admins can import spreadsheets instead of clicking row-by-row: event attendance (matched to members by email then name), fundraising campaigns, event creation, and sub-event attendance (national conferences). A shared dialog parses the CSV, classifies each row (ready / needs-resolution / skipped), lets the admin resolve conflicts inline (ambiguous names, unknown chapters, lapsed members), then applies. See [Bulk Upload](#bulk-csv-upload).
-- **Charts & Insights** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress, plus dedicated insights panels: chapter insights, fundraising insights, and a Members insights dashboard (region health, membership-level retention, education mix, and a 24-month renewal-cliff projection) served as a single JSON blob by the `member_insights()` RPC rather than shipping all ~14k rows to the client. The fundraising and Members insights panels are visible to **chapter admins and above** (members see the plain lists); the aggregates span every chapter.
+- **Charts & Insights** — Recharts-powered visualizations for chapter activity, event attendance, and fundraising progress, plus dedicated insights panels: chapter insights, fundraising insights, and a Members insights dashboard (region health, membership-level retention, education mix, and a 24-month renewal-cliff projection) served as a single JSON blob by the `member_insights()` RPC rather than shipping all ~14k rows to the client. The fundraising and Members insights panels are visible to **chapter admins and above** (members see the plain lists). A **membership churn** trend sits alongside them, scoped to national / region / chapter — see [Membership churn](#membership-churn).
 - **Responsive UI** — Mobile-friendly with sidebar navigation and dark mode support
 
 ---
@@ -571,6 +571,7 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 | **Active-only filter default** | `/members` listing, member picker | Reduces working set from ~14k to active members (~9–10k typically). |
 | **Transactional RPCs** | Attendee/event writes, sub-event attendance, bulk attendance import | Multi-statement writes (attendee row + event counters) collapse into one `SECURITY INVOKER` call so counters never drift and RLS still applies. See [20260516000001_rpcs.sql](supabase/migrations/20260516000001_rpcs.sql), [20260520000001_subevents.sql](supabase/migrations/20260520000001_subevents.sql), and [20260602000002_bulk_attendance.sql](supabase/migrations/20260602000002_bulk_attendance.sql) (`bulk_set_attendance`). |
 | **Single-roundtrip aggregates** | `/members` insights, chapter/fundraising insights | `member_insights()` computes region/level/education/renewal-cliff rollups server-side and returns one JSON blob instead of streaming ~14k rows for client-side chart math. |
+| **Trigger-captured history** | Membership churn | A row-level trigger on `members` records only *actual* `activeStatus` transitions, and a monthly `pg_cron` job records the active base per scope. `churn_trend()` then returns a whole trend in one call. The trigger's `WHEN` clause is what keeps the nightly all-rows `lastSynced` sweep from writing ~14k log rows a night. |
 
 ### Live listeners are kept where freshness matters
 
@@ -581,6 +582,53 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
 
 - Full-text search across members ("smith" finding "John Smith") could move to Postgres `tsvector` / `pg_trgm` but isn't yet — today only **case-corrected name prefix** searches work.
 - The `/events` listing fetches up to 500 events per visit (capped); not paginated. Acceptable at current event volume but a future concern.
+
+---
+
+## Membership churn
+
+Churn answers "are we losing members faster than last year, and which chapters are leaking?" — the
+one retention metric a region admin can act on without editing anything.
+
+**It is measured forward from deploy and cannot be backfilled.** `public.members` is a destructive
+upsert: the nightly sync and the webhook overwrite the row, `members.raw` is never written, and
+`sync_logs` holds only sync runs. Past churn is therefore unrecoverable, and nothing here estimates
+it. The chart is empty until two full months have accrued, and every figure it does show is measured.
+
+Two things are captured, both added in
+[20260911000001_churn_capture.sql](supabase/migrations/20260911000001_churn_capture.sql):
+
+| Table | Written by | Holds |
+|---|---|---|
+| `member_status_events` | An `AFTER INSERT` / `AFTER UPDATE` trigger on `public.members` | Every `activeStatus` transition, with the `chapterId` / `region` the member was in **at the time** — a member moved between chapters leaves their loss with the chapter they actually left |
+| `membership_base_counts` | `capture_active_base()`, monthly via `pg_cron` on the 1st at 04:00 UTC | Active members per scope (national / each region / each chapter) at the start of the month |
+
+Churn for a month = `Active → Lapsed` events during it ÷ the active base at its start.
+
+> **The update trigger's `WHEN` clause is load-bearing.** `update_member_status()` rewrites every one
+> of the ~14k member rows nightly (it stamps `lastSynced` unconditionally), so the trigger fires only
+> when `activeStatus` actually changed. Without that guard the log would gain ~14k rows a day. There
+> are two triggers rather than one `insert or update`, because a `WHEN` clause may only reference
+> `OLD` on an UPDATE trigger and cannot see `TG_OP` at all.
+
+`churn_trend(p_scope_type, p_scope, p_months)`
+([migration](supabase/migrations/20260911000002_churn_trend.sql)) returns one JSON array of
+`{ month, lapsed, reactivated, base, churnRate }`, defaulting to the caller's own scope and clamping
+the window to 36 months. **`churnRate` is `null`, never `0`, for a month with no recorded base** —
+a zero would claim "we lost nobody" rather than "we weren't measuring yet".
+
+The RPC authorises the requested scope explicitly (`national` needs `is_national_admin()`, `region`
+needs the **`region_admin` role** *and* a matching region, `chapter` needs `can_read_chapter()`) and
+raises `42501` otherwise. That check is about honesty as much as access: the function is
+`SECURITY INVOKER`, so RLS already limits its rows, and without the guard a chapter admin asking for
+`national` would quietly receive their own chapter's numbers under a National heading. The role half
+of the region check matters because chapter admins carry a `region` claim too.
+
+**Known blind spot.** Contacts archived in Wild Apricot are dropped by the sync
+(`$filter=Archived eq false`, and `mapContactToMember` returns `null` for them), so their row simply
+stops being updated — it never transitions and never registers as churn. Someone archived while
+Active inflates the base indefinitely. Fixing that means capturing archived contacts with a status
+column instead of dropping them, which touches every member query.
 
 ---
 
@@ -748,3 +796,35 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
   lastLogin: Timestamp
 }
 ```
+
+### Member Status Event (table: `public.member_status_events`)
+Append-only churn log. Written only by the trigger on `public.members`; no client write path
+exists. See [Membership churn](#membership-churn).
+```typescript
+{
+  id: string                     // uuid
+  memberId: string               // members.id (WA contact id); deliberately NOT a FK —
+                                 // the log outlives the row it describes
+  chapterId: string | null       // as it was AT THE TIME of the event
+  region: string | null          // as it was AT THE TIME of the event
+  fromStatus: string | null      // null when the member row was just created
+  toStatus: string
+  occurredAt: Timestamp
+}
+```
+
+### Membership Base Count (table: `public.membership_base_counts`)
+Monthly active-member count per scope — the churn denominator. Written by
+`capture_active_base()` on a `pg_cron` schedule.
+```typescript
+{
+  id: string                     // uuid
+  periodStart: string            // YYYY-MM-01, month boundaries in America/New_York
+  scopeType: "national" | "region" | "chapter"
+  scope: string                  // "national" | region name | chapterId
+  activeCount: number
+  capturedAt: Timestamp
+}
+```
+> Unique on `(periodStart, scopeType, scope)`, so re-running the capture within a month updates
+> rather than duplicates.

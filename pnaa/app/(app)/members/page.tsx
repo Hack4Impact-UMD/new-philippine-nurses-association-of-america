@@ -2,6 +2,7 @@
 
 import { MemberList } from "@/components/members/member-list";
 import { MemberInsights } from "@/components/members/member-insights";
+import { ChurnTrend } from "@/components/members/churn-trend";
 import { PageHeader } from "@/components/shared/page-header";
 import { useScopeLabel } from "@/hooks/use-auth";
 
@@ -15,6 +16,7 @@ export default function MembersPage() {
         description={`Members ${scope}, synced from Wild Apricot`}
       />
       <MemberInsights />
+      <ChurnTrend />
       <MemberList />
     </div>
   );
