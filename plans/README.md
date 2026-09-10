@@ -29,6 +29,7 @@ STOP conditions, and update your row when done.
 | 004  | Renewal reminders & lapsed-member retention | P2 | L | — | TODO |
 | 005  | Member self-service portal ("My PNAA") | P2 | M | — (complements 003) | TODO |
 | 006  | Admin audit log | P3 | M | — | TODO |
+| 007  | Membership churn rate (national / region / chapter) | P1 | M | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -50,6 +51,10 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
    button (soft dependency — it degrades gracefully if 003 isn't done yet).
 6. **006 (Admin audit log)** — added in a follow-up. Lowest priority of the set; standalone
    governance feature. Fine to do any time.
+7. **007 (Churn rate)** — added in a follow-up, after the role-scoping work landed. Like 002,
+   **value compounds from the day capture starts and no backfill is possible**, so land it early
+   even though the chart shows nothing for its first two months. Self-contained; overlaps 002 only
+   in that both record a monthly active-member count.
 
 ## Dependency notes
 
@@ -65,6 +70,11 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 - **003 ↔ 005**: certificates are the natural thing a member self-downloads from the portal. 003
   builds the data/admin side; 005 mounts 003's `<CertificateButton>` if it exists, and skips it
   otherwise. Do 003 first for the full experience, but neither blocks the other.
+- **002 ↔ 007**: both record a monthly active-member count — 002 as `membership_snapshots`, 007 as
+  `membership_base_counts`. Neither blocks the other and both can coexist, but whichever lands
+  second makes one of the two monthly jobs redundant; note it here so a later pass can retire one.
+- **007 adds a trigger to `public.members`.** It is guarded to fire only on a real `activeStatus`
+  transition. Any future plan that rewrites member rows in bulk should confirm it still does.
 
 ## Findings considered and rejected (this pass)
 
