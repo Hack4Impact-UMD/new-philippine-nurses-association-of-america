@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { where, orderBy } from "@/lib/supabase/firestore";
 import { useDocument, useCollection } from "@/hooks/use-firestore";
-import { useAuth, useIsAdmin } from "@/hooks/use-auth";
+import { useAuth, useCanEditChapter } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ interface SubchapterDetailProps {
 export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEditChapter(chapterId);
   const { nameFor } = useChaptersMap();
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -219,7 +219,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
             </Link>
           </div>
         </div>
-        {isAdmin && (
+        {canEdit && (
           <div className="flex gap-2">
             <Link href={`/chapters/${chapterId}/subchapters/${subchapterId}/edit`}>
               <Button variant="outline" size="sm">
@@ -268,7 +268,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-base">Members</CardTitle>
-              {isAdmin && (
+              {canEdit && (
                 <Button
                   size="sm"
                   onClick={() => {
@@ -313,7 +313,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
                             member.activeStatus === "Active" ? "active" : "lapsed"
                           }
                         />
-                        {isAdmin && (
+                        {canEdit && (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -334,7 +334,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
 
         {/* Events Tab */}
         <TabsContent value="events" className="mt-4">
-          {isAdmin && (
+          {canEdit && (
             <div className="flex justify-end mb-4">
               <Link href={addEventUrl}>
                 <Button size="sm">
@@ -366,7 +366,7 @@ export function SubchapterDetail({ chapterId, subchapterId }: SubchapterDetailPr
 
         {/* Fundraising Tab */}
         <TabsContent value="fundraising" className="mt-4">
-          {isAdmin && (
+          {canEdit && (
             <div className="flex justify-end mb-4">
               <Link href={addCampaignUrl}>
                 <Button size="sm">

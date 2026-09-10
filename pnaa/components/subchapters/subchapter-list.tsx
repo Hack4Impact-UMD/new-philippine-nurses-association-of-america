@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { where, orderBy } from "@/lib/supabase/firestore";
 import { useCollection } from "@/hooks/use-firestore";
-import { useIsAdmin } from "@/hooks/use-auth";
+import { useCanEditChapter } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +17,7 @@ interface SubchapterListProps {
 }
 
 export function SubchapterList({ chapterId }: SubchapterListProps) {
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEditChapter(chapterId);
 
   const constraints = useMemo(
     () => [
@@ -45,7 +45,7 @@ export function SubchapterList({ chapterId }: SubchapterListProps) {
 
   return (
     <div className="space-y-4">
-      {isAdmin && (
+      {canEdit && (
         <div className="flex justify-end">
           <Link href={`/chapters/${chapterId}/subchapters/new`}>
             <Button size="sm">

@@ -2,7 +2,7 @@ import { Timestamp } from "@/lib/supabase/timestamp";
 
 export type EventType = "conference" | "community_outreach";
 
-export type ConferenceSubtype = "in_person" | "webinar";
+export type ConferenceSubtype = "in_person" | "webinar" | "hybrid";
 export type CommunityOutreachSubtype =
   | "medical_mission"
   | "health_screening"
@@ -17,13 +17,14 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
 export const EVENT_SUBTYPE_LABELS: Record<EventSubtype, string> = {
   in_person: "In Person",
   webinar: "Webinar",
+  hybrid: "Hybrid",
   medical_mission: "Medical Mission",
   health_screening: "Health Screening",
   volunteerism: "Volunteerism",
 };
 
 export const SUBTYPES_BY_TYPE: Record<EventType, EventSubtype[]> = {
-  conference: ["in_person", "webinar"],
+  conference: ["in_person", "webinar", "hybrid"],
   community_outreach: ["medical_mission", "health_screening", "volunteerism"],
 };
 

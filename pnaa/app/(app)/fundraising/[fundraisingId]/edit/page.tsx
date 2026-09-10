@@ -1,7 +1,9 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useDocument } from "@/hooks/use-firestore";
+import { useCanEditChapter } from "@/hooks/use-auth";
 import { CampaignForm } from "@/components/fundraising/campaign-form";
 import { PageHeader } from "@/components/shared/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,12 +15,20 @@ export default function EditCampaignPage({
   params: Promise<{ fundraisingId: string }>;
 }) {
   const { fundraisingId } = use(params);
+  const router = useRouter();
   const { data: campaign, loading } = useDocument<FundraisingCampaign>(
     "fundraising",
     fundraisingId
   );
+  const canEdit = useCanEditChapter(campaign?.chapterId);
 
-  if (loading) {
+  // Read-only roles get bounced back to the campaign detail page.
+  const forbidden = !loading && !!campaign && !canEdit;
+  useEffect(() => {
+    if (forbidden) router.replace(`/fundraising/${fundraisingId}`);
+  }, [forbidden, fundraisingId, router]);
+
+  if (loading || forbidden) {
     return (
       <div className="space-y-6 max-w-3xl">
         <Skeleton className="h-10 w-48" />

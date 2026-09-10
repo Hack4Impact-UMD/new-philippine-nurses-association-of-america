@@ -36,7 +36,7 @@ import { Users, UserPlus, Trash2, ChevronLeft, ChevronRight, Upload } from "luci
 import { BulkAttendanceUpload } from "@/components/events/bulk-attendance-upload";
 import { BulkAttendanceCsvDialog } from "@/components/events/bulk-attendance-csv";
 import { toast } from "sonner";
-import { useAuth, useIsAdmin, useIsNationalAdmin } from "@/hooks/use-auth";
+import { useAuth, useCanEditChapter, useIsNationalAdmin } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import { useSubevents } from "@/hooks/use-subevents";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -64,7 +64,7 @@ function escapeLike(s: string): string {
 
 export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
   const { user } = useAuth();
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEditChapter(event.chapterId);
   const isNationalAdmin = useIsNationalAdmin();
   const { nameFor: subeventNameFor } = useSubevents();
   const isNational = isNationalConference(event);
@@ -313,7 +313,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       enableSorting: true,
       accessorFn: (row) => (row.attended ? 1 : 0),
       cell: ({ row }) =>
-        isAdmin ? (
+        canEdit ? (
           <Switch
             checked={row.original.attended}
             onCheckedChange={(v) => handleToggleAttended(row.original, v)}
@@ -330,7 +330,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           <span className="text-xs text-muted-foreground">—</span>
         ),
     }),
-    [isAdmin, event.eventType, event.defaultHours, user?.email]
+    [canEdit, event.eventType, event.defaultHours, user?.email]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
@@ -353,7 +353,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         if (!r.attended) {
           return <span className="text-sm text-muted-foreground">—</span>;
         }
-        if (!isAdmin) {
+        if (!canEdit) {
           return <span className="tabular-nums text-sm">{r.hours}</span>;
         }
         return (
@@ -373,7 +373,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         );
       },
     }),
-    [isAdmin, event.eventType, user?.email]
+    [canEdit, event.eventType, user?.email]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
@@ -390,7 +390,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           const checked = (row.original.attendedSubeventIds ?? []).includes(
             subeventId
           );
-          return isAdmin ? (
+          return canEdit ? (
             <Checkbox
               checked={checked}
               onCheckedChange={(v) =>
@@ -411,7 +411,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         },
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [eventSubeventIds, isAdmin, subeventNameFor, event.defaultHours]
+    [eventSubeventIds, canEdit, subeventNameFor, event.defaultHours]
   );
 
   const totalHoursColumn: ColumnDef<AttendeeRow, unknown> = useMemo(
@@ -543,7 +543,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
       ...(isNational
         ? [...subeventColumns, totalHoursColumn]
         : [attendanceColumn, hoursColumn]),
-      ...(isAdmin
+      ...(canEdit
         ? [
             {
               id: "actions",
@@ -568,7 +568,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           ]
         : []),
     ],
-    [isAdmin, isNational, subeventColumns, totalHoursColumn, attendanceColumn, hoursColumn]
+    [canEdit, isNational, subeventColumns, totalHoursColumn, attendanceColumn, hoursColumn]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
@@ -594,7 +594,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
 
   return (
     <div className="space-y-6">
-      {isNational && isAdmin && (
+      {isNational && canEdit && (
         <section className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm font-semibold">Bulk Sub-Event Attendance</p>
@@ -609,7 +609,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         </section>
       )}
 
-      {!isNational && isAdmin && (
+      {!isNational && canEdit && (
         <section className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm font-semibold">Bulk Attendance</p>
@@ -675,7 +675,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
               {manualRows.length}
             </span>
           </h3>
-          {isAdmin && (
+          {canEdit && (
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <UserPlus className="h-4 w-4 mr-1.5" />
               Add Attendee
@@ -688,7 +688,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
           loading={manualLoading}
           emptyTitle="No manual attendees"
           emptyDescription={
-            isAdmin
+            canEdit
               ? "Click 'Add Attendee' to record a member who attended"
               : "No additional attendees recorded"
           }
@@ -698,7 +698,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         />
       </section>
 
-      {isAdmin && (
+      {canEdit && (
         <AddManualAttendeeDialog
           open={addOpen}
           onOpenChange={setAddOpen}
@@ -736,7 +736,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         </DialogContent>
       </Dialog>
 
-      {isNational && isAdmin && (
+      {isNational && canEdit && (
         <BulkAttendanceUpload
           open={bulkUploadOpen}
           onOpenChange={setBulkUploadOpen}
@@ -745,7 +745,7 @@ export function AttendeeList({ event }: { event: AppEvent & { id: string } }) {
         />
       )}
 
-      {!isNational && isAdmin && (
+      {!isNational && canEdit && (
         <BulkAttendanceCsvDialog
           open={bulkUploadOpen}
           onOpenChange={setBulkUploadOpen}

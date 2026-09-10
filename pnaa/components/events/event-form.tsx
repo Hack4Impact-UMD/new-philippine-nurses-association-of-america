@@ -56,6 +56,7 @@ const eventSchema = z.object({
   eventSubtype: z.enum([
     "in_person",
     "webinar",
+    "hybrid",
     "medical_mission",
     "health_screening",
     "volunteerism",

@@ -137,9 +137,12 @@ export function StatsCards({
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* The headline number is the active count, not active + lapsed: a
+          chapter's standing is what's currently paid up, and the combined
+          figure read as inflated growth. Total stays in the subtitle. */}
       <StatCard
-        title="Total Members"
-        value={stats.totalMembers.toLocaleString()}
+        title="Active Members"
+        value={stats.activeMembers.toLocaleString()}
         icon={Users}
         tone="blue"
         footer={
@@ -147,10 +150,10 @@ export function StatsCards({
         }
         subtitle={
           <>
-            <span className="font-medium text-emerald-600 dark:text-emerald-400">
-              {stats.activeMembers.toLocaleString()}
+            <span className="font-medium">
+              {stats.totalMembers.toLocaleString()}
             </span>{" "}
-            active ·{" "}
+            total ·{" "}
             <span
               className={cn(
                 "font-medium",

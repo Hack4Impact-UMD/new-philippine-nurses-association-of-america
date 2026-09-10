@@ -21,6 +21,7 @@ import {
 import { Users, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
+import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
 import { formatDate } from "@/lib/utils";
 import type { Member } from "@/types/member";
 
@@ -36,6 +37,12 @@ function escapeLike(s: string): string {
 export function MemberList() {
   const router = useRouter();
   const { nameFor, canonical } = useChaptersMap();
+  // Chapter-scoped users only ever get their own chapter back, so a chapter
+  // picker would offer a single option; a region admin likewise has one region.
+  const isNationalAdmin = useIsNationalAdmin();
+  const isRegionAdmin = useIsRegionAdmin();
+  const showChapterFilter = isNationalAdmin || isRegionAdmin;
+  const showRegionFilter = isNationalAdmin;
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
 
@@ -226,32 +233,36 @@ export function MemberList() {
           className="w-full lg:max-w-sm"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={chapterFilter} onValueChange={filterSetter(setChapterFilter)}>
-            <SelectTrigger className="h-9 w-[200px] text-sm">
-              <SelectValue placeholder="Chapter" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All chapters</SelectItem>
-              {chapters.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={regionFilter} onValueChange={filterSetter(setRegionFilter)}>
-            <SelectTrigger className="h-9 w-[160px] text-sm">
-              <SelectValue placeholder="Region" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All regions</SelectItem>
-              {regions.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {r}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {showChapterFilter && (
+            <Select value={chapterFilter} onValueChange={filterSetter(setChapterFilter)}>
+              <SelectTrigger className="h-9 w-[200px] text-sm">
+                <SelectValue placeholder="Chapter" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All chapters</SelectItem>
+                {chapters.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {showRegionFilter && (
+            <Select value={regionFilter} onValueChange={filterSetter(setRegionFilter)}>
+              <SelectTrigger className="h-9 w-[160px] text-sm">
+                <SelectValue placeholder="Region" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All regions</SelectItem>
+                {regions.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Select value={statusFilter} onValueChange={filterSetter(setStatusFilter)}>
             <SelectTrigger className="h-9 w-[130px] text-sm">
               <SelectValue placeholder="Status" />

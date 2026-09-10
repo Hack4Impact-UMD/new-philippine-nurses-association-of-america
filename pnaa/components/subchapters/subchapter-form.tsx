@@ -52,14 +52,12 @@ export function SubchapterForm({ chapterId, subchapterId, mode }: SubchapterForm
     mode === "edit" ? subchapterId : undefined
   );
 
-  // Access guard: chapter_admin can only manage their own chapter
-  const isChapterAdmin = user?.role === "chapter_admin";
-  const isRegionAdmin = user?.role === "region_admin";
-  const forbidden =
-    !chapterLoading &&
-    chapter &&
-    ((isChapterAdmin && chapterId !== user?.chapterId) ||
-      (isRegionAdmin && chapter.region !== user?.region));
+  // Access guard: only national admins and the chapter's own chapter_admin may
+  // write. Region admins and members review their scope read-only.
+  const canEdit =
+    user?.role === "national_admin" ||
+    (user?.role === "chapter_admin" && chapterId === user?.chapterId);
+  const forbidden = !chapterLoading && !!chapter && !canEdit;
 
   useEffect(() => {
     if (forbidden) {

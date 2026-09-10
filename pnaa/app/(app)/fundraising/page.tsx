@@ -5,19 +5,20 @@ import { CampaignList } from "@/components/fundraising/campaign-list";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { useIsAdmin } from "@/hooks/use-auth";
+import { useCanEdit, useScopeLabel } from "@/hooks/use-auth";
 import { BulkCampaignUploadButton } from "@/components/fundraising/bulk-campaign-upload";
 
 export default function FundraisingPage() {
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEdit();
+  const scope = useScopeLabel();
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Fundraising"
-        description="All fundraising campaigns across PNAA"
+        description={`Fundraising campaigns ${scope}`}
       >
-        {isAdmin && (
+        {canEdit && (
           <div className="flex items-center gap-2">
             <BulkCampaignUploadButton />
             <Button asChild>

@@ -11,7 +11,7 @@ import { EventMetrics } from "./event-metrics";
 import { AttendeeList } from "./attendee-list";
 import { formatDateRange } from "@/lib/utils";
 import { Pencil, Calendar, MapPin, Clock, Building2 } from "lucide-react";
-import { useIsAdmin } from "@/hooks/use-auth";
+import { useCanEditChapter } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import {
   EVENT_TYPE_LABELS,
@@ -21,7 +21,7 @@ import {
 
 export function EventDetail({ eventId }: { eventId: string }) {
   const { data: event, loading } = useDocument<AppEvent>("events", eventId);
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEditChapter(event?.chapterId);
   const { nameFor } = useChaptersMap();
 
   if (loading) {
@@ -89,7 +89,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
             </span>
           </div>
         </div>
-        {isAdmin && (
+        {canEdit && (
           <Link href={`/events/${eventId}/edit`}>
             <Button>
               <Pencil className="mr-2 h-4 w-4" />

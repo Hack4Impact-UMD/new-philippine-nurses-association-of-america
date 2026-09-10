@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Pencil, DollarSign, Calendar, Building2 } from "lucide-react";
-import { useIsAdmin } from "@/hooks/use-auth";
+import { useCanEditChapter } from "@/hooks/use-auth";
 import { useChaptersMap } from "@/hooks/use-chapters-map";
 import type { FundraisingCampaign } from "@/types/fundraising";
 
@@ -17,7 +17,7 @@ export function CampaignDetail({ campaignId }: { campaignId: string }) {
     "fundraising",
     campaignId
   );
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEditChapter(campaign?.chapterId);
   const { nameFor } = useChaptersMap();
 
   if (loading) {
@@ -63,7 +63,7 @@ export function CampaignDetail({ campaignId }: { campaignId: string }) {
             </span>
           </div>
         </div>
-        {isAdmin && (
+        {canEdit && (
           <Link href={`/fundraising/${campaignId}/edit`}>
             <Button>
               <Pencil className="mr-2 h-4 w-4" />

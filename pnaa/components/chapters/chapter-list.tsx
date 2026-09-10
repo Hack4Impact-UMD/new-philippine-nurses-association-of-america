@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCollectionOnce } from "@/hooks/use-firestore";
-import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
+import { useIsNationalAdmin } from "@/hooks/use-auth";
 import { orderBy } from "@/lib/supabase/firestore";
 import { SearchInput } from "@/components/shared/search-input";
 import { ChapterCard } from "./chapter-card";
@@ -27,9 +27,9 @@ const STORAGE_KEY = "pnaa-chapters-view";
 
 export function ChapterList() {
   const router = useRouter();
-  const isNationalAdmin = useIsNationalAdmin();
-  const isRegionAdmin = useIsRegionAdmin();
-  const canManageAliases = isNationalAdmin || isRegionAdmin;
+  // Alias merges rewrite which chapter a member rolls up to, so they are
+  // national-admin only. Region admins review their region read-only.
+  const canManageAliases = useIsNationalAdmin();
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);

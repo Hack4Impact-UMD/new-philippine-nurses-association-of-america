@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/lib/auth/context";
-import { useChaptersMap, type ChapterRow } from "@/hooks/use-chapters-map";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
 import {
   Select,
   SelectContent,
@@ -15,12 +15,23 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { stripChapterPrefix } from "@/lib/utils";
 
+interface DirectoryChapter {
+  id: string;
+  name: string;
+  region: string | null;
+}
+
 export default function SetupPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuthContext();
-  // Pickers must use the canonical list — aliased chapter rows still exist in
-  // the chapters table but selecting one strands the user under a dead chapter.
-  const { canonical: chapters, loading: chaptersLoading } = useChaptersMap();
+
+  // A user who hasn't picked a chapter yet has no chapter scope, so the
+  // chapters table itself reads back empty under RLS. chapter_directory() is
+  // the security-definer picker feed: id / name / region for every canonical
+  // chapter (aliased rows excluded — selecting one strands the user under a
+  // dead chapter), and nothing else.
+  const [chapters, setChapters] = useState<DirectoryChapter[]>([]);
+  const [chaptersLoading, setChaptersLoading] = useState(true);
 
   const [region, setRegion] = useState("");
   const [chapterId, setChapterId] = useState("");
@@ -36,6 +47,26 @@ export default function SetupPage() {
       router.replace("/signin");
     }
   }, [authLoading, user, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = getSupabaseBrowser();
+    supabase
+      .rpc("chapter_directory")
+      .then(({ data, error: err }: { data: DirectoryChapter[] | null; error: unknown }) => {
+        if (cancelled) return;
+        if (err) {
+          console.error("chapter_directory RPC failed", err);
+          setError("Couldn't load chapters. Please refresh to try again.");
+        } else {
+          setChapters(data ?? []);
+        }
+        setChaptersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const regions = useMemo(
     () =>

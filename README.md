@@ -297,6 +297,12 @@ WILD_APRICOT_DOMAIN=
 
 # Used by the sync trigger API route to authenticate Edge Function calls
 WEBHOOK_SECRET=
+
+# Help & Support box on the chapter dashboard. All optional — a blank value
+# just omits that line from the card. Defaults live in pnaa/lib/support.ts.
+NEXT_PUBLIC_SUPPORT_EMAIL=
+NEXT_PUBLIC_SUPPORT_PHONE=
+NEXT_PUBLIC_SUPPORT_HOURS=
 ```
 
 Edge Functions and the sync-members script read environment variables from the Supabase project's function-secrets and from GitHub Actions secrets respectively. Use the Supabase dashboard (Settings → Edge Functions → Secrets) and the GitHub repo settings (Settings → Secrets and variables → Actions):
@@ -441,14 +447,27 @@ Configure in Wild Apricot (Apps > Integrations > Webhooks):
 
 ## Roles & Permissions
 
-| Role | Access |
-|---|---|
-| `national_admin` | Full read/write access to all chapters, events, fundraising, members, users, and chapter aliases |
-| `region_admin` | Read access to all data; can create/edit events and fundraising for chapters in their region; can manage chapter aliases |
-| `chapter_admin` | Read access to all data; can create/edit events and fundraising for their chapter |
-| `member` | Read-only access to events, chapters, fundraising, and their own user profile |
+| Role | Can view | Can edit |
+|---|---|---|
+| `national_admin` | Everything | Everything — chapters, events, fundraising, subchapters, members, users, chapter aliases |
+| `region_admin` | Every chapter in their region | **Nothing** — the region view is strictly read-only |
+| `chapter_admin` | Their own chapter only | Events, fundraising and subchapters for their own chapter |
+| `member` | Their own chapter only | Nothing (their own `displayName` aside) |
 
 Roles live in `auth.users.app_metadata.user_role` and are mirrored in `public.users.role`. RLS policies enforce permissions server-side via `public.auth_role()` which reads `auth.jwt() -> 'app_metadata' ->> 'user_role'`.
+
+Two helpers carry the whole model, so scope changes happen in one place each:
+
+| Helper | Guards |
+|---|---|
+| `public.can_read_chapter(chapterId)` | SELECT policies on `events`, `fundraising`, `subchapters`, `attendees`, `chapter_aliases`. `chapters` and `members` inline the same rule to avoid a policy that queries its own table (`chapters`) and a per-row subquery across ~14k rows (`members`). |
+| `public.can_write_chapter(chapterId)` | INSERT/UPDATE policies on `events`, `fundraising`, `subchapters`, `attendees`, plus every event-mutating RPC via `assert_can_write_event()`. |
+
+The `national` chapter is the organization itself rather than someone else's chapter, so its `chapters` row and the events hanging off it (`chapterId = 'national'`, or null for cross-chapter events) stay readable by every authenticated user. Without that carve-out the national conference, its sub-events and its attendee roster would disappear for everyone but national admins.
+
+`/setup` is the one place that needs the full chapter directory: a brand-new user has no chapter scope yet, so `chapters` reads back empty for them. `public.chapter_directory()` is a `SECURITY DEFINER` RPC returning only `id` / `name` / `region` for canonical (non-aliased) chapters — enough to populate the onboarding picker without exposing the aggregate member counts on the table.
+
+Defined in [supabase/migrations/20260910000001_scoped_visibility.sql](supabase/migrations/20260910000001_scoped_visibility.sql).
 
 Soft deletes are used for events, fundraising, and subchapters (no hard deletes allowed via RLS — records are archived with `archived: true`).
 
@@ -466,7 +485,7 @@ Per client requirements, all monetary values associated with events are **gated 
 | Events table ([event-list.tsx](pnaa/components/events/event-list.tsx)) | `totalRevenue` column (and its CSV/XLSX export) | Hidden |
 | Attendee list ([attendee-list.tsx](pnaa/components/events/attendee-list.tsx)) | `paidSum`, `registrationFee` dollar amounts | Hidden — payment column still shows Free / Paid in Full / Unpaid status |
 
-Note: this gating is **UI-only**. The underlying columns remain readable by any authenticated user under current RLS policies. Tighten the policies (or move revenue/payment fields to a `national_admin`-restricted view) if server-side enforcement is needed.
+Note: this gating is **UI-only**. RLS now limits *which rows* each role can read (see [Roles & Permissions](#roles--permissions)), but within a readable row the revenue and payment columns are still returned to any authenticated user. A chapter admin can therefore read their own chapter's event revenue via the API even though the UI hides it. Move those fields to a `national_admin`-restricted view if server-side enforcement is needed.
 
 ---
 
@@ -476,7 +495,7 @@ Every event has a **type** and **subtype**. The type drives how attendee hours a
 
 | Type | Subtypes | Hours behavior |
 |---|---|---|
-| **Conference** | In Person, Webinar | All attendees marked attended earn the event's `defaultHours`. Editing `defaultHours` propagates live to every attended attendee (see [propagateConferenceDefaultHours](pnaa/lib/supabase/attendees.ts)). |
+| **Conference** | In Person, Webinar, Hybrid | All attendees marked attended earn the event's `defaultHours`. Editing `defaultHours` propagates live to every attended attendee (see [propagateConferenceDefaultHours](pnaa/lib/supabase/attendees.ts)). |
 | **Community Outreach** | Medical Mission, Health Screening, Volunteerism | `defaultHours` autofills the field when an attendee is added or marked attended, but admins can override hours per-person. |
 
 Wild Apricot–synced events default to `eventType: "conference"`, `eventSubtype: "in_person"`, `defaultHours: 0`. Admins can change these on the edit form; the subtype dropdown filters its options based on the chosen type.

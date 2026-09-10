@@ -8,7 +8,7 @@ import {
   useAuth,
   useIsNationalAdmin,
   useIsRegionAdmin,
-  useIsAdmin,
+  useCanEdit,
   useUserChapter,
   useUserRegion,
 } from "@/hooks/use-auth";
@@ -26,6 +26,7 @@ import { UpcomingEvents } from "@/components/dashboard/upcoming-events";
 import { RecentFundraising } from "@/components/dashboard/recent-fundraising";
 import { RegionChart } from "@/components/dashboard/region-chart";
 import { SyncStatusCard } from "@/components/dashboard/sync-status-card";
+import { SupportCard } from "@/components/dashboard/support-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { cn, stripChapterPrefix } from "@/lib/utils";
@@ -44,7 +45,7 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const isNationalAdmin = useIsNationalAdmin();
   const isRegionAdmin = useIsRegionAdmin();
-  const isAdmin = useIsAdmin();
+  const canEdit = useCanEdit();
   const userChapter = useUserChapter();
   const userRegion = useUserRegion();
   const { nameFor, regionFor } = useChaptersMap();
@@ -142,7 +143,7 @@ export default function DashboardPage() {
         title={`${greetingFor(new Date())}, ${firstName}`}
         description={scopeLabel}
       >
-        {isAdmin && (
+        {canEdit && (
           <>
             <Button asChild variant="outline" size="sm">
               <Link href="/fundraising/new">
@@ -182,9 +183,10 @@ export default function DashboardPage() {
           </div>
         </>
       ) : (
-        <div className="grid items-start gap-6 lg:grid-cols-2">
+        <div className="grid items-start gap-6 lg:grid-cols-3">
           <UpcomingEvents events={upcomingEvents} />
           <RecentFundraising campaigns={campaigns} />
+          <SupportCard />
         </div>
       )}
     </div>

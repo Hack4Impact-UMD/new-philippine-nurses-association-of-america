@@ -15,7 +15,7 @@ export default function ChapterAliasesPage({
   const { chapterId } = use(params);
 
   return (
-    <RequireRole roles={["national_admin", "region_admin"]}>
+    <RequireRole roles={["national_admin"]}>
       <div className="space-y-6">
         <Link href={`/chapters/${chapterId}`}>
           <Button variant="ghost" size="sm" className="-ml-2">

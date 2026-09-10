@@ -7,7 +7,7 @@ import {
   useCollection,
   useCollectionOnce,
 } from "@/hooks/use-firestore";
-import { useIsNationalAdmin, useIsRegionAdmin } from "@/hooks/use-auth";
+import { useIsNationalAdmin } from "@/hooks/use-auth";
 import { where, orderBy } from "@/lib/supabase/firestore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -107,9 +107,7 @@ const memberColumns: ColumnDef<MemberRow, unknown>[] = [
 ];
 
 export function ChapterDetail({ chapterId }: { chapterId: string }) {
-  const isNationalAdmin = useIsNationalAdmin();
-  const isRegionAdmin = useIsRegionAdmin();
-  const canManageAliases = isNationalAdmin || isRegionAdmin;
+  const canManageAliases = useIsNationalAdmin();
 
   const { data: chapter, loading: chapterLoading } = useDocument<Chapter>(
     "chapters",
