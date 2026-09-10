@@ -7,7 +7,8 @@ export interface Subchapter {
   description: string;
   memberIds: string[];
   archived: boolean;
-  createdBy: string;
+  /** auth.users.id (uuid) of the creator — null for rows migrated from Firestore. */
+  createdBy: string | null;
   lastUpdatedUser: string;
   createdAt: Timestamp;
   lastUpdated: Timestamp;

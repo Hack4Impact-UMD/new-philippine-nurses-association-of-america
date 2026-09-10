@@ -107,7 +107,11 @@ export function SubchapterForm({ chapterId, subchapterId, mode }: SubchapterForm
           chapterId,
           memberIds: [],
           archived: false,
-          createdBy: user?.email || "",
+          // subchapters."createdBy" is a uuid column holding the auth user id.
+          // Passing an email (or "") makes Postgres reject the whole insert
+          // with "invalid input syntax for type uuid". lastUpdatedUser is text
+          // and does take the email.
+          createdBy: user?.uid ?? null,
           lastUpdatedUser: user?.email || "",
         });
         toast.success("Subchapter created");
@@ -122,7 +126,15 @@ export function SubchapterForm({ chapterId, subchapterId, mode }: SubchapterForm
         router.push(`/chapters/${chapterId}/subchapters/${subchapterId}`);
       }
     } catch (error) {
-      toast.error("Failed to save subchapter");
+      // Surface the server's message — a bare "Failed to save" hides RLS
+      // rejections and column type errors that are otherwise only in console.
+      const detail =
+        error && typeof error === "object" && "message" in error
+          ? String((error as { message: unknown }).message)
+          : "";
+      toast.error(
+        detail ? `Failed to save subchapter: ${detail}` : "Failed to save subchapter"
+      );
       console.error(error);
     } finally {
       setIsSubmitting(false);

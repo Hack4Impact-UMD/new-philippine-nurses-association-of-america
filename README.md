@@ -713,8 +713,8 @@ Postgres is cheaper per read than Firestore, but Supabase Realtime has its own c
   description: string
   memberIds: string[]
   archived: boolean
-  createdBy: string              // uuid (auth.users.id)
-  lastUpdatedUser: string
+  createdBy: string | null       // uuid (auth.users.id); null on migrated rows
+  lastUpdatedUser: string        // email — free text, unlike createdBy
   createdAt: Timestamp
   lastUpdated: Timestamp
 }
