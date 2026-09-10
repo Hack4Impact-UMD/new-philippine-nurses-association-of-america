@@ -12,3 +12,4 @@ export type { Attendee } from "./attendee";
 export type { Subevent } from "./subevent";
 export type { FundraisingCampaign } from "./fundraising";
 export type { AppUser, UserRole } from "./user";
+export type { ChurnPoint, ChurnScopeType } from "./churn";
