@@ -617,7 +617,7 @@ Churn for a month = `Active → Lapsed` events during it ÷ the active base at i
 the window to 36 months. **`churnRate` is `null`, never `0`, for a month with no recorded base** —
 a zero would claim "we lost nobody" rather than "we weren't measuring yet".
 
-The RPC authorises the requested scope explicitly (`national` needs `is_national_admin()`, `region`
+The RPC authorises the requested scope explicitly, through the `resolve_view_scope()` helper it shares with the new/renewed member list (`national` needs `is_national_admin()`, `region`
 needs the **`region_admin` role** *and* a matching region, `chapter` needs `can_read_chapter()`) and
 raises `42501` otherwise. That check is about honesty as much as access: the function is
 `SECURITY INVOKER`, so RLS already limits its rows, and without the guard a chapter admin asking for
@@ -629,6 +629,32 @@ of the region check matters because chapter admins carry a `region` claim too.
 stops being updated — it never transitions and never registers as churn. Someone archived while
 Active inflates the base indefinitely. Fixing that means capturing archived contacts with a status
 column instead of dropping them, which touches every member query.
+
+---
+
+## New & renewed members
+
+A monthly list of who joined or renewed, with name, email, membership level, chapter and region, for a national, region or chapter scope. **Admins only.** It sits on the Members page below churn, and exports to CSV / XLSX through the table's select-all.
+
+**Recorded from launch onward, with no history.** Neither event was recorded anywhere before: `members` is a destructive upsert, and a renewal overwrites the previous due date. [20260912000001_membership_events.sql](supabase/migrations/20260912000001_membership_events.sql) adds `membership_events`, written by triggers on `public.members`:
+
+| Kind | Recorded when |
+|---|---|
+| `joined` | A member row is created **Active** with a membership level, or an existing row becomes Active having either had no level before (a contact who became a member) or never had a renewal date (a pending application that was just paid) |
+| `renewed` | "Renewal due" moves **later** on a row with a level. Covers an active member renewing early and a lapsed member coming back alike |
+
+- **Rows without a membership level are ignored.** The sync pulls every non-archived Wild Apricot contact with no membership filter, so those are contacts who never joined, such as event registrants.
+- **Deduplicated.** A member joins once, ever. A renewal date corrected twice in one month is still one renewal.
+- **Cheap on the nightly sweep.** The update trigger fires only when the renewal date, level or status changed, so `update_member_status()`'s all-rows `lastSynced` stamp writes nothing here.
+- **Can't break a sync.** Renewal dates are parsed leniently, and the trigger catches its own errors and raises a warning instead, because the sync and the webhook both write through this table.
+- **Real time where possible.** The webhook's upsert fires the trigger the moment Wild Apricot reports a change. The nightly full sync catches anything the webhook missed, up to a day late. The webhook's `MembershipRenewed` message type is not used directly: watching the due date covers both paths without an Edge Function change.
+
+**Access follows the member.** The `membership_events` read policy requires `is_admin()` *and* a member row the caller can already read, so `members_read` decides whose name and email appear. `member_joins_and_renewals(p_month, p_scope_type, p_scope)` scopes by the member's **current** chapter and region: a member who moves chapters moves to the other chapter's list. Scope authorisation is the same `resolve_view_scope()` churn uses, so the two cannot drift on who may see what.
+
+**Known limits:**
+- A long-standing member whose row is created fresh, for example after being un-archived in Wild Apricot, reads as new.
+- An admin correcting a renewal date *later* in Wild Apricot reads as a renewal.
+- A row with an unparseable renewal date that later gets a valid one reads as a join.
 
 ---
 
@@ -828,3 +854,17 @@ Monthly active-member count per scope — the churn denominator. Written by
 ```
 > Unique on `(periodStart, scopeType, scope)`, so re-running the capture within a month updates
 > rather than duplicates.
+
+### Membership Event (table: `public.membership_events`)
+Joins and renewals, recorded from launch. Written only by the triggers on `public.members`. See
+[New & renewed members](#new--renewed-members).
+```typescript
+{
+  id: string                     // uuid
+  memberId: string               // FK → members.id, on delete cascade
+  kind: "joined" | "renewed"
+  eventMonth: string             // YYYY-MM-01, month boundaries in America/New_York
+  occurredAt: Timestamp
+}
+```
+> Unique on `memberId` for `joined` rows, and on `(memberId, kind, eventMonth)`.
