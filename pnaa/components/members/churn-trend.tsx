@@ -11,15 +11,6 @@ import {
 import { format, parseISO } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -35,30 +26,16 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
-import {
-  useAuth,
-  useIsAdmin,
-  useIsNationalAdmin,
-  useIsRegionAdmin,
-  useUserChapter,
-  useUserRegion,
-} from "@/hooks/use-auth";
-import { useChaptersMap } from "@/hooks/use-chapters-map";
-import { cn, stripChapterPrefix } from "@/lib/utils";
+import { useAuth, useIsAdmin } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import type { ChurnPoint } from "@/types/churn";
+import { ScopeSelect, useViewScope } from "./scope-select";
 
 // One series, so no legend: the card title names it. Teal is the repo's
 // primary chart token and carries its own light/dark steps.
 const chartConfig = {
   churnRate: { label: "Churn rate", color: "var(--chart-1)" },
 } satisfies ChartConfig;
-
-/** Scope encoded into a single select value: "national" | "region:X" | "chapter:Y". */
-function parseScope(value: string): { scopeType: string; scope: string | null } {
-  if (value === "national") return { scopeType: "national", scope: null };
-  const [scopeType, ...rest] = value.split(":");
-  return { scopeType, scope: rest.join(":") };
-}
 
 function formatPercent(rate: number | null, digits = 1): string {
   if (rate == null) return "—";
@@ -68,11 +45,7 @@ function formatPercent(rate: number | null, digits = 1): string {
 export function ChurnTrend() {
   const { isLoading: authLoading } = useAuth();
   const isAdmin = useIsAdmin();
-  const isNationalAdmin = useIsNationalAdmin();
-  const isRegionAdmin = useIsRegionAdmin();
-  const userChapter = useUserChapter();
-  const userRegion = useUserRegion();
-  const { canonical, nameFor } = useChaptersMap();
+  const scope = useViewScope();
 
   const [months, setMonths] = useState(12);
   const [showTable, setShowTable] = useState(false);
@@ -82,53 +55,17 @@ export function ChurnTrend() {
   const [error, setError] = useState<string | null>(null);
   const [captureStart, setCaptureStart] = useState<string | null>(null);
 
-  // A chapter admin has exactly one possible scope, so the picker is hidden and
-  // the card is labelled with their chapter instead.
-  const chapterScoped = !isNationalAdmin && !isRegionAdmin;
-
-  const [scopeValue, setScopeValue] = useState<string>(() => {
-    if (isNationalAdmin) return "national";
-    if (isRegionAdmin && userRegion) return `region:${userRegion}`;
-    return userChapter ? `chapter:${userChapter}` : "national";
-  });
-
-  // Role can arrive after first render (auth resolves async), so re-seed the
-  // default scope once it does — but never stomp a choice the user has made.
-  const [scopeTouched, setScopeTouched] = useState(false);
-  useEffect(() => {
-    if (scopeTouched || authLoading) return;
-    if (isNationalAdmin) setScopeValue("national");
-    else if (isRegionAdmin && userRegion) setScopeValue(`region:${userRegion}`);
-    else if (userChapter) setScopeValue(`chapter:${userChapter}`);
-  }, [authLoading, isNationalAdmin, isRegionAdmin, userRegion, userChapter, scopeTouched]);
-
-  const regions = useMemo(
-    () =>
-      Array.from(
-        new Set(canonical.map((c) => c.region).filter((r): r is string => !!r))
-      ).sort(),
-    [canonical]
-  );
-  const chapters = useMemo(
-    () =>
-      [...canonical]
-        .filter((c) => c.id !== "national")
-        .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
-    [canonical]
-  );
-
   useEffect(() => {
     if (authLoading || !isAdmin) return;
     let cancelled = false;
     const first = points === null;
     void (async () => {
-      const { scopeType, scope } = parseScope(scopeValue);
       const supabase = getSupabaseBrowser();
       if (first) setLoading(true);
       else setRefetching(true);
       const { data, error: err } = await supabase.rpc("churn_trend", {
-        p_scope_type: scopeType,
-        p_scope: scope,
+        p_scope_type: scope.scopeType,
+        p_scope: scope.scope,
         p_months: months,
       });
       if (cancelled) return;
@@ -149,7 +86,7 @@ export function ChurnTrend() {
     // `points` is deliberately absent: it's read only to tell a first load from
     // a refetch, and including it would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, isAdmin, scopeValue, months]);
+  }, [authLoading, isAdmin, scope.scopeType, scope.scope, months]);
 
   // When measurement began — used by the empty state. RLS scopes this to what
   // the caller may see, and capture started at the same time for every scope.
@@ -188,13 +125,6 @@ export function ChurnTrend() {
     return { rate: lapsed / startBase, lapsed, from: measured[0].month, to: measured[measured.length - 1].month };
   }, [measured]);
 
-  const scopeLabel = useMemo(() => {
-    const { scopeType, scope } = parseScope(scopeValue);
-    if (scopeType === "national") return "All PNAA chapters";
-    if (scopeType === "region") return scope ?? "Your region";
-    return stripChapterPrefix(nameFor(scope, "Your chapter"));
-  }, [scopeValue, nameFor]);
-
   if (!authLoading && !isAdmin) return null;
 
   return (
@@ -205,46 +135,7 @@ export function ChurnTrend() {
       <CardContent className="space-y-4">
         {/* One control row, above everything it scopes. */}
         <div className="flex flex-wrap items-center gap-2">
-          {chapterScoped ? (
-            <span className="text-sm font-medium">{scopeLabel}</span>
-          ) : (
-            <Select
-              value={scopeValue}
-              onValueChange={(v) => {
-                setScopeTouched(true);
-                setScopeValue(v);
-              }}
-            >
-              <SelectTrigger className="h-9 w-[240px] text-sm">
-                <SelectValue placeholder="Scope" />
-              </SelectTrigger>
-              <SelectContent>
-                {isNationalAdmin && (
-                  <SelectItem value="national">National</SelectItem>
-                )}
-                {regions.length > 0 && (
-                  <SelectGroup>
-                    <SelectLabel>Regions</SelectLabel>
-                    {regions.map((r) => (
-                      <SelectItem key={r} value={`region:${r}`}>
-                        {r}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-                {chapters.length > 0 && (
-                  <SelectGroup>
-                    <SelectLabel>Chapters</SelectLabel>
-                    {chapters.map((c) => (
-                      <SelectItem key={c.id} value={`chapter:${c.id}`}>
-                        {stripChapterPrefix(c.name)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-              </SelectContent>
-            </Select>
-          )}
+          <ScopeSelect scope={scope} />
 
           <div className="flex items-center gap-1">
             {[12, 24].map((m) => (
@@ -289,7 +180,7 @@ export function ChurnTrend() {
               refetching && "opacity-50"
             )}
           >
-            <Hero trailing={trailing} scopeLabel={scopeLabel} />
+            <Hero trailing={trailing} scopeLabel={scope.label} />
             {showTable ? (
               <ChurnTable points={points ?? []} />
             ) : (
