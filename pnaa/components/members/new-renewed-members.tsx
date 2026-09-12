@@ -29,7 +29,7 @@ import type {
   MembershipEventKind,
   MembershipEventRow,
 } from "@/types/membership-event";
-import { ScopeSelect, useViewScope } from "./scope-select";
+import { ScopeSelect, useViewScope, type ViewScope } from "./scope-select";
 
 type KindFilter = "all" | MembershipEventKind;
 
@@ -49,12 +49,19 @@ function monthKey(d: Date): string {
  * at the first recorded month rather than offering months that can only ever
  * be empty.
  */
-export function NewRenewedMembers() {
+export function NewRenewedMembers({
+  scope: sharedScope,
+}: {
+  scope?: ViewScope;
+}) {
   const router = useRouter();
   const { isLoading: authLoading } = useAuth();
   const isAdmin = useIsAdmin();
   const { nameFor } = useChaptersMap();
-  const scope = useViewScope();
+  // A parent can share one scope across tools, as the Members page tabs do.
+  // Rendered on its own, the card keeps its own scope.
+  const ownScope = useViewScope();
+  const scope = sharedScope ?? ownScope;
 
   const [month, setMonth] = useState(() => monthKey(new Date()));
   const [kind, setKind] = useState<KindFilter>("all");

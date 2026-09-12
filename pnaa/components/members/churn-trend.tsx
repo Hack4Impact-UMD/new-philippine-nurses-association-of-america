@@ -29,7 +29,7 @@ import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { useAuth, useIsAdmin } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type { ChurnPoint } from "@/types/churn";
-import { ScopeSelect, useViewScope } from "./scope-select";
+import { ScopeSelect, useViewScope, type ViewScope } from "./scope-select";
 
 // One series, so no legend: the card title names it. Teal is the repo's
 // primary chart token and carries its own light/dark steps.
@@ -42,10 +42,13 @@ function formatPercent(rate: number | null, digits = 1): string {
   return `${(rate * 100).toFixed(digits)}%`;
 }
 
-export function ChurnTrend() {
+export function ChurnTrend({ scope: sharedScope }: { scope?: ViewScope }) {
   const { isLoading: authLoading } = useAuth();
   const isAdmin = useIsAdmin();
-  const scope = useViewScope();
+  // A parent can share one scope across tools, as the Members page tabs do.
+  // Rendered on its own, the card keeps its own scope.
+  const ownScope = useViewScope();
+  const scope = sharedScope ?? ownScope;
 
   const [months, setMonths] = useState(12);
   const [showTable, setShowTable] = useState(false);
