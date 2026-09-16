@@ -62,12 +62,10 @@ export default function AboutPage() {
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 text-sm">
             {[
-              "Northeast Region",
-              "Southeast Region",
-              "Central Region",
+              "Eastern Region",
               "Western Region",
-              "Mid-Atlantic Region",
-              "Southern Region",
+              "North Central Region",
+              "South Central Region",
             ].map((region) => (
               <div
                 key={region}
@@ -99,7 +97,7 @@ export default function AboutPage() {
                 Today
               </span>
               <p>
-                Over 4,000 members across 55 chapters serve communities
+                Over 7,000 members across 62 chapters serve communities
                 throughout the United States
               </p>
             </div>
