@@ -218,6 +218,7 @@ export function NewRenewedMembers({
         header: "Level",
         size: 170,
         enableSorting: true,
+        meta: { filterType: "text" } satisfies ColumnMeta,
         cell: ({ row }) => (
           <span className="text-sm">{row.original.membershipLevel}</span>
         ),

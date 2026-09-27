@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import type { SortingState } from "@tanstack/react-table";
+import type { ColumnFiltersState, SortingState } from "@tanstack/react-table";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { SearchInput } from "@/components/shared/search-input";
 import {
   AdvancedDataTable,
   type ColumnDef,
+  type ColumnMeta,
 } from "@/components/shared/advanced-data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,7 @@ export function MemberList() {
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
   ]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<MemberRow[]>([]);
@@ -63,6 +65,9 @@ export function MemberList() {
 
   const sort = sorting[0] ?? { id: "name", desc: false };
   const trimmed = debouncedSearch.trim();
+  const levelFilter = columnFilters.find(
+    filter => filter.id === "membershipLevel"
+  );
 
   // Any search/filter/sort change restarts from page 0 — done in the event
   // handlers (not an effect) so there's no transient fetch of a stale page.
@@ -80,6 +85,10 @@ export function MemberList() {
     setSorting(updater);
     setPage(0);
   };
+  const handleColumnFiltersChange: typeof setColumnFilters = (updater) => {
+    setColumnFilters(updater);
+    setPage(0);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +103,9 @@ export function MemberList() {
       // Case-insensitive substring match (Postgres ILIKE). Backed by the
       // (activeStatus, name) index for the common active-only case.
       q = q.ilike("name", `%${escapeLike(trimmed)}%`);
+    }
+    if (levelFilter) {
+      q = q.ilike("membershipLevel", `%${escapeLike(String(levelFilter.value))}%`);
     }
 
     q.order(sort.id, { ascending: !sort.desc })
@@ -120,7 +132,7 @@ export function MemberList() {
     return () => {
       cancelled = true;
     };
-  }, [page, trimmed, statusFilter, chapterFilter, regionFilter, sort.id, sort.desc]);
+  }, [page, trimmed, levelFilter, statusFilter, chapterFilter, regionFilter, sort.id, sort.desc]);
 
   const chapters = useMemo(
     () => [...canonical].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
@@ -183,6 +195,7 @@ export function MemberList() {
         header: "Level",
         size: 160,
         enableSorting: true,
+        meta: { filterType: "text" } satisfies ColumnMeta,
         cell: ({ row }) => (
           <span className="text-sm">{row.original.membershipLevel}</span>
         ),
@@ -294,10 +307,13 @@ export function MemberList() {
       <AdvancedDataTable<MemberRow>
         columns={columns}
         data={rows}
-        loading={loading}
+        loading={loading && total === null}
         manualSorting
         sorting={sorting}
         onSortingChange={handleSortingChange}
+        manualFiltering
+        columnFilters={columnFilters}
+        onColumnFiltersChange={handleColumnFiltersChange}
         onRowClick={(member) => router.push(`/members/${member.id}`)}
         emptyTitle={
           isSearching || hasFilters ? "No matching members" : "No members"

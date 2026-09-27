@@ -158,6 +158,10 @@ interface AdvancedDataTableProps<T> {
   manualSorting?: boolean;
   sorting?: SortingState;
   onSortingChange?: OnChangeFn<SortingState>;
+  // Server-driven filtering
+  manualFiltering?: boolean;
+  columnFilters?: ColumnFiltersState;
+  onColumnFiltersChange?: OnChangeFn<ColumnFiltersState>;
 }
 
 // Using `any` for the header generic to avoid JSX generic syntax issues in .tsx
@@ -408,12 +412,17 @@ export function AdvancedDataTable<T extends object>({
   manualSorting = false,
   sorting: controlledSorting,
   onSortingChange,
+  manualFiltering = false,
+  columnFilters: controlledColumnFilters,
+  onColumnFiltersChange,
 }: AdvancedDataTableProps<T>) {
   const [internalSorting, setInternalSorting] = useState<SortingState>([]);
   const sorting = controlledSorting ?? internalSorting;
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
+  const [internalColumnFilters, setInternalColumnFilters] = useState<ColumnFiltersState>(
     defaultColumnFilters ?? [],
   );
+  const columnFilters = controlledColumnFilters ?? internalColumnFilters;
+  const setColumnFilters = onColumnFiltersChange ?? setInternalColumnFilters;
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -519,6 +528,7 @@ export function AdvancedDataTable<T extends object>({
       return String(row);
     },
     manualSorting,
+    manualFiltering,
     onSortingChange: onSortingChange ?? setInternalSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
@@ -688,7 +698,7 @@ export function AdvancedDataTable<T extends object>({
     );
   }
 
-  if (data.length === 0) {
+  if (data.length === 0 && !manualFiltering) {
     return (
       <EmptyState
         icon={emptyIcon}
