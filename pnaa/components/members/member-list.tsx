@@ -68,6 +68,7 @@ export function MemberList() {
   const levelFilter = columnFilters.find(
     filter => filter.id === "membershipLevel"
   );
+  const debouncedLevelFilter = useDebounce(levelFilter?.value as string, 300);
 
   // Any search/filter/sort change restarts from page 0 — done in the event
   // handlers (not an effect) so there's no transient fetch of a stale page.
@@ -104,8 +105,8 @@ export function MemberList() {
       // (activeStatus, name) index for the common active-only case.
       q = q.ilike("name", `%${escapeLike(trimmed)}%`);
     }
-    if (levelFilter) {
-      q = q.ilike("membershipLevel", `%${escapeLike(String(levelFilter.value))}%`);
+    if (debouncedLevelFilter) {
+      q = q.ilike("membershipLevel", `%${escapeLike(String(debouncedLevelFilter))}%`);
     }
 
     q.order(sort.id, { ascending: !sort.desc })
@@ -132,7 +133,7 @@ export function MemberList() {
     return () => {
       cancelled = true;
     };
-  }, [page, trimmed, levelFilter, statusFilter, chapterFilter, regionFilter, sort.id, sort.desc]);
+  }, [page, trimmed, debouncedLevelFilter, statusFilter, chapterFilter, regionFilter, sort.id, sort.desc]);
 
   const chapters = useMemo(
     () => [...canonical].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
@@ -230,7 +231,7 @@ export function MemberList() {
 
   const isSearching = trimmed.length > 0;
   const hasFilters =
-    statusFilter !== "Active" || chapterFilter !== "all" || regionFilter !== "all";
+    statusFilter !== "Active" || chapterFilter !== "all" || regionFilter !== "all" || columnFilters.length > 0;
   const pageCount =
     total !== null ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : null;
   const hasMore =
@@ -295,6 +296,8 @@ export function MemberList() {
                 setStatusFilter("Active");
                 setChapterFilter("all");
                 setRegionFilter("all");
+                setColumnFilters([]);
+                setPage(0);
               }}
             >
               <X className="h-3.5 w-3.5" />
