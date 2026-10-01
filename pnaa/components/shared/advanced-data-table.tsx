@@ -698,7 +698,7 @@ export function AdvancedDataTable<T extends object>({
     );
   }
 
-  if (data.length === 0) {
+  if (data.length === 0 && !manualFiltering) {
     return (
       <EmptyState
         icon={emptyIcon}
