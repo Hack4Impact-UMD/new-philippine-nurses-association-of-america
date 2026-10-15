@@ -1,7 +1,7 @@
 // Full member sync from Wild Apricot → Supabase.
-// Replaces functions/src/sync-members.ts. Lives outside Edge Functions because
-// the WA async-contacts job can take 5-8 minutes for 14k contacts, which
-// exceeds Supabase Edge Functions' 400s wall time.
+// Replaces functions/src/sync-members.ts. Contacts are read with synchronous
+// pagination ($async=false&$top&$skip). Lives outside Edge Functions because 
+// the contacts sync job would exceed their 400s wall time.
 //
 // Run locally:    npm run sync-members
 // Run scheduled:  via .github/workflows/sync-members.yml
@@ -20,10 +20,6 @@ import {
   type ChapterAliasRow,
 } from "./wa-utils.js";
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 async function fetchAllWAContacts(
   accessToken: string,
   accountId: string
@@ -33,39 +29,12 @@ async function fetchAllWAContacts(
     Accept: "application/json",
   };
 
-  const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$filter=Archived%20eq%20false`;
-  const initResponse = await fetch(initUrl, { headers });
-  if (!initResponse.ok) {
-    throw new Error(`WA contacts request failed: ${initResponse.statusText}`);
-  }
-  let data = (await initResponse.json()) as Record<string, unknown>;
-
-  const resultUrl = data.ResultUrl as string | undefined;
-  if (resultUrl && data.State !== "Complete") {
-    console.log("syncMembers: waiting for WA contacts job...");
-    for (let attempt = 0; attempt < 96; attempt++) {
-      await sleep(5000);
-      const r = await fetch(resultUrl, { headers });
-      if (!r.ok) throw new Error(`WA contacts poll failed: ${r.statusText}`);
-      data = (await r.json()) as Record<string, unknown>;
-      if (data.State === "Complete") break;
-    }
-    if (data.State !== "Complete") {
-      throw new Error(`WA contacts async job timed out (last state: ${data.State})`);
-    }
-  }
-
-  const totalCount = (data.ResultCount as number) || 0;
-  console.log(`syncMembers: ${totalCount} total contacts`);
-
   const PAGE_SIZE = 100;
   const allContacts: Record<string, unknown>[] = [];
   let skip = 0;
-  const baseUrl = resultUrl || initUrl;
 
   while (true) {
-    const sep = baseUrl.includes("?") ? "&" : "?";
-    const pageUrl = `${baseUrl}${sep}$top=${PAGE_SIZE}&$skip=${skip}`;
+    const pageUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$async=false&$filter=Archived%20eq%20false&$top=${PAGE_SIZE}&$skip=${skip}`;
     const r = await fetch(pageUrl, { headers });
     if (!r.ok) {
       // Throw rather than break: a partial snapshot would zero out chapter
