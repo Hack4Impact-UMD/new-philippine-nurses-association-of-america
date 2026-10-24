@@ -66,15 +66,23 @@ async function fetchAllWAContacts(
     if (contacts.length < PAGE_SIZE) break;
   }
 
+  // Paging a live list can return a contact twice, and a repeated id in one
+  // upsert chunk makes Postgres reject the chunk. Dedupe before the count
+  // check so duplicates can't mask missing contacts.
+  const uniqueContacts = [...new Map(allContacts.map((c) => [String(c.Id), c])).values()];
+  if (uniqueContacts.length < allContacts.length) {
+    console.log(`syncMembers: dropped ${allContacts.length - uniqueContacts.length} duplicate contacts`);
+  }
+
   // Allow 1% drift for contacts added or archived during the run.
   const COUNT_TOLERANCE = Math.ceil(expectedCount * 0.01);
-  if (Math.abs(allContacts.length - expectedCount) > COUNT_TOLERANCE) {
+  if (Math.abs(uniqueContacts.length - expectedCount) > COUNT_TOLERANCE) {
     throw new Error(
-      `WA contacts fetch incomplete: got ${allContacts.length}, expected ${expectedCount} (±${COUNT_TOLERANCE})`
+      `WA contacts fetch incomplete: got ${uniqueContacts.length}, expected ${expectedCount} (±${COUNT_TOLERANCE})`
     );
   }
 
-  return allContacts;
+  return uniqueContacts;
 }
 
 const COMPARE_FIELDS: (keyof MemberData)[] = [
