@@ -29,12 +29,26 @@ async function fetchAllWAContacts(
     Accept: "application/json",
   };
 
+  const baseUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$async=false&$filter=Archived%20eq%20false`;
+
+  // Expected total, checked after paging: a short page ends the loop, so a
+  // page cut short mid-list would otherwise look like the last one.
+  const countResponse = await fetch(`${baseUrl}&$count=true`, { headers });
+  if (!countResponse.ok) {
+    throw new Error(`WA contacts count failed: ${countResponse.statusText}`);
+  }
+  const expectedCount = ((await countResponse.json()) as { Count?: number }).Count;
+  if (typeof expectedCount !== "number") {
+    throw new Error("WA contacts count response had no Count");
+  }
+  console.log(`syncMembers: ${expectedCount} total contacts`);
+
   const PAGE_SIZE = 100;
   const allContacts: Record<string, unknown>[] = [];
   let skip = 0;
 
   while (true) {
-    const pageUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$async=false&$filter=Archived%20eq%20false&$top=${PAGE_SIZE}&$skip=${skip}`;
+    const pageUrl = `${baseUrl}&$top=${PAGE_SIZE}&$skip=${skip}`;
     const r = await fetch(pageUrl, { headers });
     if (!r.ok) {
       // Throw rather than break: a partial snapshot would zero out chapter
@@ -50,6 +64,14 @@ async function fetchAllWAContacts(
     allContacts.push(...contacts);
     skip += contacts.length;
     if (contacts.length < PAGE_SIZE) break;
+  }
+
+  // Allow 1% drift for contacts added or archived during the run.
+  const COUNT_TOLERANCE = Math.ceil(expectedCount * 0.01);
+  if (Math.abs(allContacts.length - expectedCount) > COUNT_TOLERANCE) {
+    throw new Error(
+      `WA contacts fetch incomplete: got ${allContacts.length}, expected ${expectedCount} (±${COUNT_TOLERANCE})`
+    );
   }
 
   return allContacts;
