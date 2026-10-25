@@ -1,12 +1,13 @@
 // Full member sync from Wild Apricot → Supabase.
-// Replaces functions/src/sync-members.ts. Lives outside Edge Functions because
-// the WA async-contacts job can take 5-8 minutes for 14k contacts, which
-// exceeds Supabase Edge Functions' 400s wall time.
+// Replaces functions/src/sync-members.ts. Contacts are read with synchronous
+// pagination ($async=false&$top&$skip). Lives outside Edge Functions because 
+// the contacts sync job would exceed their 400s wall time.
 //
 // Run locally:    npm run sync-members
 // Run scheduled:  via .github/workflows/sync-members.yml
 
 import "dotenv/config";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createClient } from "@supabase/supabase-js";
 import {
   getWAToken,
@@ -20,8 +21,24 @@ import {
   type ChapterAliasRow,
 } from "./wa-utils.js";
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+// One sync is ~160 WA requests, so retry 429 / 5xx / network errors with
+// backoff (1s, 2s, 4s, or Retry-After). The final attempt's response or error
+// goes to the caller.
+async function fetchWithRetry(url: string, init: RequestInit, retries = 3): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    let delay = 1000 * 2 ** (attempt - 1);
+    try {
+      const r = await fetch(url, init);
+      if (r.status !== 429 && r.status < 500) return r;
+      const retryAfter = Number(r.headers.get("Retry-After"));
+      if (retryAfter > 0) delay = Math.min(retryAfter, 60) * 1000;
+      console.log(`syncMembers: WA ${r.status}, retry ${attempt}/${retries} in ${delay}ms`);
+    } catch {
+      console.log(`syncMembers: WA network error, retry ${attempt}/${retries} in ${delay}ms`);
+    }
+    await sleep(delay);
+  }
+  return fetch(url, init);
 }
 
 async function fetchAllWAContacts(
@@ -33,40 +50,27 @@ async function fetchAllWAContacts(
     Accept: "application/json",
   };
 
-  const initUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$filter=Archived%20eq%20false`;
-  const initResponse = await fetch(initUrl, { headers });
-  if (!initResponse.ok) {
-    throw new Error(`WA contacts request failed: ${initResponse.statusText}`);
-  }
-  let data = (await initResponse.json()) as Record<string, unknown>;
+  const baseUrl = `https://api.wildapricot.org/v2/accounts/${accountId}/contacts?$async=false&$filter=Archived%20eq%20false`;
 
-  const resultUrl = data.ResultUrl as string | undefined;
-  if (resultUrl && data.State !== "Complete") {
-    console.log("syncMembers: waiting for WA contacts job...");
-    for (let attempt = 0; attempt < 96; attempt++) {
-      await sleep(5000);
-      const r = await fetch(resultUrl, { headers });
-      if (!r.ok) throw new Error(`WA contacts poll failed: ${r.statusText}`);
-      data = (await r.json()) as Record<string, unknown>;
-      if (data.State === "Complete") break;
-    }
-    if (data.State !== "Complete") {
-      throw new Error(`WA contacts async job timed out (last state: ${data.State})`);
-    }
+  // Expected total, checked after paging: a short page ends the loop, so a
+  // page cut short mid-list would otherwise look like the last one.
+  const countResponse = await fetchWithRetry(`${baseUrl}&$count=true`, { headers });
+  if (!countResponse.ok) {
+    throw new Error(`WA contacts count failed: ${countResponse.statusText}`);
   }
-
-  const totalCount = (data.ResultCount as number) || 0;
-  console.log(`syncMembers: ${totalCount} total contacts`);
+  const expectedCount = ((await countResponse.json()) as { Count?: number }).Count;
+  if (typeof expectedCount !== "number") {
+    throw new Error("WA contacts count response had no Count");
+  }
+  console.log(`syncMembers: ${expectedCount} total contacts`);
 
   const PAGE_SIZE = 100;
   const allContacts: Record<string, unknown>[] = [];
   let skip = 0;
-  const baseUrl = resultUrl || initUrl;
 
   while (true) {
-    const sep = baseUrl.includes("?") ? "&" : "?";
-    const pageUrl = `${baseUrl}${sep}$top=${PAGE_SIZE}&$skip=${skip}`;
-    const r = await fetch(pageUrl, { headers });
+    const pageUrl = `${baseUrl}&$top=${PAGE_SIZE}&$skip=${skip}`;
+    const r = await fetchWithRetry(pageUrl, { headers });
     if (!r.ok) {
       // Throw rather than break: a partial snapshot would zero out chapter
       // aggregates for chapters whose members didn't make it into this run,
@@ -83,7 +87,23 @@ async function fetchAllWAContacts(
     if (contacts.length < PAGE_SIZE) break;
   }
 
-  return allContacts;
+  // Paging a live list can return a contact twice, and a repeated id in one
+  // upsert chunk makes Postgres reject the chunk. Dedupe before the count
+  // check so duplicates can't mask missing contacts.
+  const uniqueContacts = [...new Map(allContacts.map((c) => [String(c.Id), c])).values()];
+  if (uniqueContacts.length < allContacts.length) {
+    console.log(`syncMembers: dropped ${allContacts.length - uniqueContacts.length} duplicate contacts`);
+  }
+
+  // Allow 1% drift for contacts added or archived during the run.
+  const COUNT_TOLERANCE = Math.ceil(expectedCount * 0.01);
+  if (Math.abs(uniqueContacts.length - expectedCount) > COUNT_TOLERANCE) {
+    throw new Error(
+      `WA contacts fetch incomplete: got ${uniqueContacts.length}, expected ${expectedCount} (±${COUNT_TOLERANCE})`
+    );
+  }
+
+  return uniqueContacts;
 }
 
 const COMPARE_FIELDS: (keyof MemberData)[] = [
