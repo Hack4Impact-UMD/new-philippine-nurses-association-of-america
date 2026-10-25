@@ -7,6 +7,7 @@
 // Run scheduled:  via .github/workflows/sync-members.yml
 
 import "dotenv/config";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createClient } from "@supabase/supabase-js";
 import {
   getWAToken,
@@ -19,6 +20,25 @@ import {
   type ChapterRow,
   type ChapterAliasRow,
 } from "./wa-utils.js";
+
+// One sync is ~160 WA requests, so retry 429 / 5xx / network errors with
+// backoff (1s, 2s, 4s, or Retry-After). The final attempt's response or error
+// goes to the caller.
+async function fetchWithRetry(url: string, init: RequestInit, retries = 3): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    let delay = 1000 * 2 ** (attempt - 1);
+    try {
+      const r = await fetch(url, init);
+      if (r.status !== 429 && r.status < 500) return r;
+      const retryAfter = Number(r.headers.get("Retry-After"));
+      console.log(`syncMembers: WA ${r.status}, retry ${attempt}/${retries} in ${delay}ms`);
+    } catch {
+      console.log(`syncMembers: WA network error, retry ${attempt}/${retries} in ${delay}ms`);
+    }
+    await sleep(delay);
+  }
+  return fetch(url, init);
+}
 
 async function fetchAllWAContacts(
   accessToken: string,
@@ -33,7 +53,7 @@ async function fetchAllWAContacts(
 
   // Expected total, checked after paging: a short page ends the loop, so a
   // page cut short mid-list would otherwise look like the last one.
-  const countResponse = await fetch(`${baseUrl}&$count=true`, { headers });
+  const countResponse = await fetchWithRetry(`${baseUrl}&$count=true`, { headers });
   if (!countResponse.ok) {
     throw new Error(`WA contacts count failed: ${countResponse.statusText}`);
   }
@@ -49,7 +69,7 @@ async function fetchAllWAContacts(
 
   while (true) {
     const pageUrl = `${baseUrl}&$top=${PAGE_SIZE}&$skip=${skip}`;
-    const r = await fetch(pageUrl, { headers });
+    const r = await fetchWithRetry(pageUrl, { headers });
     if (!r.ok) {
       // Throw rather than break: a partial snapshot would zero out chapter
       // aggregates for chapters whose members didn't make it into this run,
