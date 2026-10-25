@@ -31,6 +31,7 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 3): Prom
       const r = await fetch(url, init);
       if (r.status !== 429 && r.status < 500) return r;
       const retryAfter = Number(r.headers.get("Retry-After"));
+      if (retryAfter > 0) delay = Math.min(retryAfter, 60) * 1000;
       console.log(`syncMembers: WA ${r.status}, retry ${attempt}/${retries} in ${delay}ms`);
     } catch {
       console.log(`syncMembers: WA network error, retry ${attempt}/${retries} in ${delay}ms`);
