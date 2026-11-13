@@ -38,3 +38,20 @@ npm run dev:staging
 
 See [Staging Environment](../README.md#staging-environment) in the root README for
 the full list of required environment variables.
+
+## Tests
+
+App tests (Vitest + Testing Library, jsdom):
+
+```bash
+npm test            # once
+npm run test:watch  # on change
+```
+
+Database tests (pgTAP, in `../supabase/tests`) run against the local Supabase
+stack, never a hosted project:
+
+```bash
+supabase start
+supabase test db
+```

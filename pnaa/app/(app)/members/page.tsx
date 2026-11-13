@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BarChart3, TrendingDown, UserPlus, Users } from "lucide-react";
+import { BarChart3, TrendingDown, UserMinus, UserPlus, Users } from "lucide-react";
 import { MemberList } from "@/components/members/member-list";
 import { MemberInsights } from "@/components/members/member-insights";
 import { ChurnTrend } from "@/components/members/churn-trend";
 import { NewRenewedMembers } from "@/components/members/new-renewed-members";
+import { LapsedMembers } from "@/components/members/lapsed-members";
 import { useViewScope } from "@/components/members/scope-select";
 import { PageHeader } from "@/components/shared/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,6 +21,7 @@ const TABS = [
   { value: "insights", label: "Insights", icon: BarChart3 },
   { value: "churn", label: "Churn", icon: TrendingDown },
   { value: "new-renewed", label: "New & Renewed", icon: UserPlus },
+  { value: "lapsed", label: "Lapsed", icon: UserMinus },
 ] as const;
 
 type TabValue = (typeof TABS)[number]["value"];
@@ -37,8 +39,8 @@ export default function MembersPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // One scope for both retention tools, so a chapter picked on Churn is still
-  // picked on New & Renewed.
+  // One scope for all the retention tools, so a chapter picked on Churn is
+  // still picked on New & Renewed and Lapsed.
   const retentionScope = useViewScope();
 
   // The tab lives in the URL, so a shared link or a refresh lands on the same
@@ -106,6 +108,11 @@ export default function MembersPage() {
         {show("new-renewed") && (
           <TabsContent value="new-renewed" forceMount className={hiddenWhenInactive}>
             <NewRenewedMembers scope={retentionScope} />
+          </TabsContent>
+        )}
+        {show("lapsed") && (
+          <TabsContent value="lapsed" forceMount className={hiddenWhenInactive}>
+            <LapsedMembers scope={retentionScope} />
           </TabsContent>
         )}
       </Tabs>
