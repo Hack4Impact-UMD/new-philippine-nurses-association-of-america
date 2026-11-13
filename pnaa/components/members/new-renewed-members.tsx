@@ -1,26 +1,17 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  format,
-  isBefore,
-  parseISO,
-  startOfMonth,
-  subMonths,
-} from "date-fns";
+import { format, parseISO, startOfMonth } from "date-fns";
 import { UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { SearchInput } from "@/components/shared/search-input";
+import {
+  MonthRangePicker,
+  formatMonthRange,
+} from "@/components/shared/month-range-picker";
 import {
   AdvancedDataTable,
   type ColumnDef,
@@ -50,13 +41,13 @@ function monthKey(d: Date): string {
 }
 
 /** Matches EARLIEST_START_DATE in scripts/member-joins.ts. */
-const EARLIEST_MONTH = new Date(1900, 0, 1);
+const EARLIEST_MONTH = "1900-01-01";
 
 /**
  * Who joined or renewed in a range of months, for one national / region /
  * chapter scope. Admins only. Joins go back to each member's Wild Apricot start
  * date (scripts/backfill-member-joins.ts); renewals are recorded from launch
- * onward. The month pickers start at the first recorded month rather than
+ * onward. The month picker starts at the first recorded month rather than
  * offering months that can only ever be empty.
  */
 export function NewRenewedMembers({
@@ -74,11 +65,11 @@ export function NewRenewedMembers({
   const scope = sharedScope ?? ownScope;
 
   // An inclusive month range, so several months can be viewed and exported
-  // together. From > To is treated as the same range swapped.
-  const [fromMonth, setFromMonth] = useState(() => monthKey(new Date()));
-  const [toMonth, setToMonth] = useState(() => monthKey(new Date()));
-  const [startMonth, endMonth] =
-    fromMonth <= toMonth ? [fromMonth, toMonth] : [toMonth, fromMonth];
+  // together. The picker always hands back start <= end.
+  const [[startMonth, endMonth], setRange] = useState<[string, string]>(() => {
+    const now = monthKey(new Date());
+    return [now, now];
+  });
   const [kind, setKind] = useState<KindFilter>("all");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -144,23 +135,16 @@ export function NewRenewedMembers({
     };
   }, [authLoading, isAdmin]);
 
-  const monthOptions = useMemo(() => {
-    const current = startOfMonth(new Date());
-    const earliest = firstRecorded
-      ? startOfMonth(parseISO(firstRecorded))
-      : current;
-    const out: string[] = [];
-    // Bounded at EARLIEST_MONTH, the oldest start date the backfill accepts,
-    // so a bad date can never spin this loop.
-    for (
-      let d = current;
-      !isBefore(d, earliest) && !isBefore(d, EARLIEST_MONTH);
-      d = subMonths(d, 1)
-    ) {
-      out.push(monthKey(d));
-    }
-    return out.length > 0 ? out : [monthKey(current)];
-  }, [firstRecorded]);
+  // The picker spans the first recorded month to this month. Never before
+  // EARLIEST_MONTH, the oldest start date the backfill accepts, so one bad
+  // date can't offer a picker reaching back to year 1.
+  const maxMonth = monthKey(new Date());
+  const minMonth = (() => {
+    if (!firstRecorded) return maxMonth;
+    const first = monthKey(parseISO(firstRecorded));
+    if (first > maxMonth) return maxMonth;
+    return first < EARLIEST_MONTH ? EARLIEST_MONTH : first;
+  })();
 
   const counts = useMemo(
     () => ({
@@ -265,11 +249,7 @@ export function NewRenewedMembers({
 
   if (!authLoading && !isAdmin) return null;
 
-  const fmtMonth = (m: string) => format(parseISO(m), "MMMM yyyy");
-  const monthLabel =
-    startMonth === endMonth
-      ? fmtMonth(startMonth)
-      : `${fmtMonth(startMonth)} – ${fmtMonth(endMonth)}`;
+  const monthLabel = formatMonthRange(startMonth, endMonth);
   const fileMonths =
     startMonth === endMonth
       ? startMonth.slice(0, 7)
@@ -286,33 +266,13 @@ export function NewRenewedMembers({
         <div className="flex flex-wrap items-center gap-2">
           <ScopeSelect scope={scope} />
 
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            {(
-              [
-                ["From", fromMonth, setFromMonth],
-                ["To", toMonth, setToMonth],
-              ] as const
-            ).map(([label, value, onChange]) => (
-              <Fragment key={label}>
-                {label === "To" && <span>to</span>}
-                <Select value={value} onValueChange={onChange}>
-                  <SelectTrigger
-                    className="h-9 w-[170px] text-sm text-foreground"
-                    aria-label={`${label} month`}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {monthOptions.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {fmtMonth(m)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Fragment>
-            ))}
-          </div>
+          <MonthRangePicker
+            from={startMonth}
+            to={endMonth}
+            min={minMonth}
+            max={maxMonth}
+            onChange={(from, to) => setRange([from, to])}
+          />
 
           <div className="flex items-center gap-1">
             {(

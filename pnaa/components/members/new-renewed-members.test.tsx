@@ -65,7 +65,7 @@ vi.mock("next/navigation", () => ({
 
 import { NewRenewedMembers } from "./new-renewed-members";
 
-// Radix Select measures and captures pointers, which jsdom lacks.
+// Radix popovers and selects measure and capture pointers, which jsdom lacks.
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
@@ -88,13 +88,21 @@ function event(
   };
 }
 
-/** Open a month select and return the labels it offers, top to bottom. */
-async function openMonthSelect(user: ReturnType<typeof userEvent.setup>, which: "From" | "To") {
-  await user.click(screen.getByRole("combobox", { name: `${which} month` }));
-  const listbox = await screen.findByRole("listbox");
-  return within(listbox)
-    .getAllByRole("option")
-    .map((o) => o.textContent ?? "");
+/** Open the month range picker. */
+async function openPicker(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /^Months:/ }));
+  return screen.findByRole("group", { name: /^Months of/ });
+}
+
+/** The picker's min month arrives after mount; wait for it to reach `year`. */
+async function waitForYear(user: ReturnType<typeof userEvent.setup>, year: string) {
+  await waitFor(async () => {
+    if (!screen.queryByRole("group", { name: /^Months of/ })) await openPicker(user);
+    if (!screen.queryByRole("group", { name: "Years" })) {
+      await user.click(screen.getByRole("button", { name: /Choose year/ }));
+    }
+    expect(screen.getByRole("button", { name: year })).toBeInTheDocument();
+  });
 }
 
 beforeEach(() => {
@@ -125,51 +133,49 @@ describe("NewRenewedMembers", () => {
       p_scope_type: "national",
       p_scope: null,
     });
-    expect(screen.getByRole("combobox", { name: "From month" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /^Months:/ })).toHaveTextContent(
       "November 2026"
     );
   });
 
-  it("offers every month back to the oldest backfilled join, not just ten years", async () => {
+  it("lets the picker reach back to the oldest backfilled join", async () => {
     const user = userEvent.setup();
     firstRecorded = "1985-04-01";
     render(<NewRenewedMembers />);
     await waitFor(() => expect(firstRecordedQuery).toHaveBeenCalledWith("membership_events"));
 
-    await waitFor(async () => {
-      // Re-open until the first-recorded month has arrived.
-      const options = await openMonthSelect(user, "From");
-      expect(options.at(-1)).toBe("April 1985");
-    });
-    const options = within(screen.getByRole("listbox"))
-      .getAllByRole("option")
-      .map((o) => o.textContent);
-    // Nov 2026 back to Apr 1985 inclusive: 41 years and 8 months.
-    expect(options).toHaveLength(41 * 12 + 8);
-    expect(options[0]).toBe("November 2026");
-    expect(options).toContain("January 2000");
-    expect(options).not.toContain("March 1985");
+    await waitForYear(user, "1985");
+    const years = within(screen.getByRole("group", { name: "Years" }))
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    expect(years).toHaveLength(2026 - 1985 + 1);
+
+    await user.click(screen.getByRole("button", { name: "1985" }));
+    expect(screen.getByRole("button", { name: "March 1985" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "April 1985" })).toBeEnabled();
   });
 
   it("offers only this month before anything has been recorded", async () => {
     const user = userEvent.setup();
     render(<NewRenewedMembers />);
     await waitFor(() => expect(firstRecordedQuery).toHaveBeenCalled());
-    expect(await openMonthSelect(user, "To")).toEqual(["November 2026"]);
+    const months = await openPicker(user);
+    const enabled = within(months)
+      .getAllByRole("button")
+      .filter((b) => !b.hasAttribute("disabled"))
+      .map((b) => b.getAttribute("aria-label"));
+    expect(enabled).toEqual(["November 2026"]);
+    expect(screen.getByRole("button", { name: "Previous year" })).toBeDisabled();
   });
 
-  it("fetches a decades-long range in a single request", async () => {
+  it("fetches all time, decades of months, in a single request", async () => {
     const user = userEvent.setup();
     firstRecorded = "1985-04-01";
     render(<NewRenewedMembers />);
     await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+    await waitForYear(user, "1985");
 
-    await waitFor(async () => {
-      await openMonthSelect(user, "From");
-      expect(screen.getByRole("option", { name: "April 1985" })).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole("option", { name: "April 1985" }));
-
+    await user.click(screen.getByRole("button", { name: "All time" }));
     await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
     expect(rpc).toHaveBeenLastCalledWith("member_joins_and_renewals", {
       p_month: "1985-04-01",
@@ -177,26 +183,29 @@ describe("NewRenewedMembers", () => {
       p_scope_type: "national",
       p_scope: null,
     });
+    expect(screen.getByRole("button", { name: /^Months:/ })).toHaveTextContent(
+      "Apr 1985 – Nov 2026"
+    );
   });
 
-  it("reads a reversed range as the same range", async () => {
+  it("orders a range picked end-first", async () => {
     const user = userEvent.setup();
     firstRecorded = "1998-01-01";
     render(<NewRenewedMembers />);
     await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+    await waitForYear(user, "1998");
+    await user.click(screen.getByRole("button", { name: "1998" }));
 
-    await waitFor(async () => {
-      await openMonthSelect(user, "To");
-      expect(screen.getByRole("option", { name: "July 1998" })).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole("option", { name: "July 1998" }));
+    await user.click(screen.getByRole("button", { name: "December 1998" }));
+    await user.click(screen.getByRole("button", { name: "July 1998" }));
 
     await waitFor(() =>
       expect(rpc).toHaveBeenLastCalledWith(
         "member_joins_and_renewals",
-        expect.objectContaining({ p_month: "1998-07-01", p_to_month: "2026-11-01" })
+        expect.objectContaining({ p_month: "1998-07-01", p_to_month: "1998-12-01" })
       )
     );
+    expect(screen.getByText(/No new or renewed members for Jul – Dec 1998/)).toBeInTheDocument();
   });
 
   it("shows a backfilled join on its Wild Apricot start date", async () => {
