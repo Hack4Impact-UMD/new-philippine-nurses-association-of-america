@@ -2,19 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format, isBefore, parseISO, startOfMonth, subMonths } from "date-fns";
+import { format, parseISO, startOfMonth } from "date-fns";
 import { UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { SearchInput } from "@/components/shared/search-input";
+import {
+  MonthRangePicker,
+  formatMonthRange,
+} from "@/components/shared/month-range-picker";
 import {
   AdvancedDataTable,
   type ColumnDef,
@@ -43,11 +40,15 @@ function monthKey(d: Date): string {
   return format(startOfMonth(d), "yyyy-MM-dd");
 }
 
+/** Matches EARLIEST_START_DATE in scripts/member-joins.ts. */
+const EARLIEST_MONTH = "1975-01-01";
+
 /**
- * Who joined or renewed in a given month, for one national / region / chapter
- * scope. Admins only. Recorded from launch onward, so the month picker starts
- * at the first recorded month rather than offering months that can only ever
- * be empty.
+ * Who joined or renewed in a range of months, for one national / region /
+ * chapter scope. Admins only. Joins go back to each member's Wild Apricot start
+ * date (scripts/backfill-member-joins.ts); renewals are recorded from launch
+ * onward. The month picker starts at the first recorded month rather than
+ * offering months that can only ever be empty.
  */
 export function NewRenewedMembers({
   scope: sharedScope,
@@ -63,7 +64,12 @@ export function NewRenewedMembers({
   const ownScope = useViewScope();
   const scope = sharedScope ?? ownScope;
 
-  const [month, setMonth] = useState(() => monthKey(new Date()));
+  // An inclusive month range, so several months can be viewed and exported
+  // together. The picker always hands back start <= end.
+  const [[startMonth, endMonth], setRange] = useState<[string, string]>(() => {
+    const now = monthKey(new Date());
+    return [now, now];
+  });
   const [kind, setKind] = useState<KindFilter>("all");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -79,10 +85,13 @@ export function NewRenewedMembers({
     void (async () => {
       setLoading(true);
       const supabase = getSupabaseBrowser();
+      // One call for the whole range, newest first. Joins reach back decades
+      // now, so a range can span hundreds of months.
       const { data, error: err } = await supabase.rpc(
         "member_joins_and_renewals",
         {
-          p_month: month,
+          p_month: startMonth,
+          p_to_month: endMonth,
           p_scope_type: scope.scopeType,
           p_scope: scope.scope,
         }
@@ -101,10 +110,11 @@ export function NewRenewedMembers({
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAdmin, month, scope.scopeType, scope.scope]);
+  }, [authLoading, isAdmin, startMonth, endMonth, scope.scopeType, scope.scope]);
 
-  // The earliest month anything was recorded. RLS limits this to members the
-  // caller can see, which is fine: recording began at the same time for all.
+  // The earliest month anything was recorded: usually the oldest backfilled
+  // Wild Apricot start date. RLS limits this to members the caller can see,
+  // so a chapter admin's picker starts at their own chapter's oldest join.
   useEffect(() => {
     if (authLoading || !isAdmin) return;
     let cancelled = false;
@@ -125,18 +135,16 @@ export function NewRenewedMembers({
     };
   }, [authLoading, isAdmin]);
 
-  const monthOptions = useMemo(() => {
-    const current = startOfMonth(new Date());
-    const earliest = firstRecorded
-      ? startOfMonth(parseISO(firstRecorded))
-      : current;
-    const out: string[] = [];
-    // Capped so a bad date can never spin this loop.
-    for (let d = current, i = 0; !isBefore(d, earliest) && i < 120; d = subMonths(d, 1), i++) {
-      out.push(monthKey(d));
-    }
-    return out.length > 0 ? out : [monthKey(current)];
-  }, [firstRecorded]);
+  // The picker spans the first recorded month to this month. Never before
+  // EARLIEST_MONTH, the oldest start date the backfill accepts, so one bad
+  // date can't offer a picker reaching back to year 1.
+  const maxMonth = monthKey(new Date());
+  const minMonth = (() => {
+    if (!firstRecorded) return maxMonth;
+    const first = monthKey(parseISO(firstRecorded));
+    if (first > maxMonth) return maxMonth;
+    return first < EARLIEST_MONTH ? EARLIEST_MONTH : first;
+  })();
 
   const counts = useMemo(
     () => ({
@@ -241,7 +249,11 @@ export function NewRenewedMembers({
 
   if (!authLoading && !isAdmin) return null;
 
-  const monthLabel = format(parseISO(month), "MMMM yyyy");
+  const monthLabel = formatMonthRange(startMonth, endMonth);
+  const fileMonths =
+    startMonth === endMonth
+      ? startMonth.slice(0, 7)
+      : `${startMonth.slice(0, 7)}_to_${endMonth.slice(0, 7)}`;
   const slug = scope.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   return (
@@ -254,18 +266,13 @@ export function NewRenewedMembers({
         <div className="flex flex-wrap items-center gap-2">
           <ScopeSelect scope={scope} />
 
-          <Select value={month} onValueChange={setMonth}>
-            <SelectTrigger className="h-9 w-[170px] text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {monthOptions.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {format(parseISO(m), "MMMM yyyy")}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <MonthRangePicker
+            from={startMonth}
+            to={endMonth}
+            min={minMonth}
+            max={maxMonth}
+            onChange={(from, to) => setRange([from, to])}
+          />
 
           <div className="flex items-center gap-1">
             {(
@@ -306,7 +313,7 @@ export function NewRenewedMembers({
             data={visibleRows}
             loading={loading}
             globalFilter={debouncedSearch}
-            getRowId={(r) => `${r.memberId}-${r.kind}`}
+            getRowId={(r) => `${r.memberId}-${r.kind}-${r.occurredAt}`}
             onRowClick={(r) => router.push(`/members/${r.memberId}`)}
             emptyIcon={UserPlus}
             emptyTitle={`No ${
@@ -314,11 +321,11 @@ export function NewRenewedMembers({
             } members for ${monthLabel}`}
             emptyDescription={
               firstRecorded
-                ? `${scope.label}. Joins and renewals are recorded as they happen.`
+                ? `${scope.label}. New members are listed by their Wild Apricot start date; renewals are recorded from launch onward.`
                 : "Joins and renewals are recorded from launch onward, so this list fills in as they happen."
             }
             defaultPageSize={25}
-            exportFilename={`PNAA_new_renewed_${slug}_${month.slice(0, 7)}`}
+            exportFilename={`PNAA_new_renewed_${slug}_${fileMonths}`}
           />
         )}
       </CardContent>

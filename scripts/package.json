@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "sync-members": "tsx sync-members.ts",
+    "backfill-member-joins": "tsx backfill-member-joins.ts",
     "migrate": "tsx migrate.ts",
-    "migrate:dry-run": "tsx migrate.ts --dry-run"
+    "migrate:dry-run": "tsx migrate.ts --dry-run",
+    "test": "vitest run",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -15,7 +18,10 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.35",
+    "@types/pg": "^8.11.10",
+    "firebase-admin": "^13.7.0",
+    "pg": "^8.13.1",
     "typescript": "^5.7.0",
-    "firebase-admin": "^13.7.0"
+    "vitest": "^3.2.7"
   }
 }

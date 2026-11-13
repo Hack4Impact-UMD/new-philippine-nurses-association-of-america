@@ -2,7 +2,8 @@ export type MembershipEventKind = "joined" | "renewed";
 
 /**
  * One row of the monthly new / renewed member list, as returned by the
- * `member_joins_and_renewals` RPC. Recorded from launch onward only — see
+ * `member_joins_and_renewals` RPC. Joins date from each member's Wild Apricot
+ * start date (scripts/backfill-member-joins.ts); renewals from launch onward — see
  * supabase/migrations/20260912000001_membership_events.sql.
  */
 export interface MembershipEventRow {
