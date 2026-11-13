@@ -239,3 +239,37 @@ export function mapContactToMember(
     lastSynced: new Date().toISOString(),
   };
 }
+
+// ---------- Member start date ----------
+
+/**
+ * A contact's membership start date from Wild Apricot's "Member since" system
+ * field, as YYYY-MM-DD, or null when it is missing or not a real date.
+ *
+ * Matched on SystemCode first, since admins can rename a field's label but not
+ * its system code. WA sends the value as an account-local timestamp such as
+ * "2015-03-12T00:00:00-05:00"; only the calendar date is kept, so a time zone
+ * offset can never move someone's start onto the previous day.
+ */
+export function extractMemberSince(
+  fieldValues: Array<{ FieldName: string; Value: unknown; SystemCode?: string }>
+): string | null {
+  const field =
+    fieldValues.find((f) => f.SystemCode === "MemberSince") ??
+    fieldValues.find((f) => f.FieldName === "Member since");
+  if (!field || typeof field.Value !== "string") return null;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(field.Value.trim());
+  if (!match) return null;
+  const [, y, m, d] = match;
+  // Reject dates that roll over, e.g. 2021-02-30.
+  const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+  if (
+    date.getUTCFullYear() !== Number(y) ||
+    date.getUTCMonth() !== Number(m) - 1 ||
+    date.getUTCDate() !== Number(d)
+  ) {
+    return null;
+  }
+  return `${y}-${m}-${d}`;
+}
