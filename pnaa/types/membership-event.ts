@@ -19,3 +19,23 @@ export interface MembershipEventRow {
   kind: MembershipEventKind;
   occurredAt: string;
 }
+
+/**
+ * One row of the lapsed member list, as returned by the `lapsed_members` RPC —
+ * see supabase/migrations/20261113000001_lapsed_members.sql. Bucket it with
+ * `lapsedBucket()` from lib/lapsed.ts.
+ */
+export interface LapsedMemberRow {
+  memberId: string;
+  name: string | null;
+  email: string | null;
+  membershipLevel: string | null;
+  chapterId: string | null;
+  /** Null when the caller can't read the chapter row itself. */
+  chapterName: string | null;
+  region: string | null;
+  /** The renewal due date that passed, YYYY-MM-DD. */
+  lapsedOn: string;
+  /** Whole days since `lapsedOn` on the org's (America/New_York) calendar. Never negative. */
+  daysLapsed: number;
+}
