@@ -21,14 +21,16 @@ export interface JoinBackfillPlan {
     notMember: number;
     /** "Member since" missing or not a date. */
     noStartDate: number;
-    /** Before 1900 or after today, so a data-entry error rather than a join. */
+    /** Before 1975 or after today, so a data-entry error rather than a join. */
     outOfRange: number;
   };
   /** Count of planned joins per year, for eyeballing a dry run. */
   byYear: Record<string, number>;
 }
 
-export const EARLIEST_START_DATE = "1900-01-01";
+// PNAA was founded in 1979. Wild Apricot often holds 1900-01-01 as a
+// placeholder, so a floor at 1900 would let those through as real joins.
+export const EARLIEST_START_DATE = "1975-01-01";
 
 type FieldValue = { FieldName: string; Value: unknown; SystemCode?: string };
 

@@ -27,7 +27,7 @@ create or replace function public.backfill_member_joins(
 ) returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_received       integer;
@@ -125,6 +125,8 @@ grant execute on function public.backfill_member_joins(jsonb, boolean) to servic
 -- PostgREST could not choose between the two.
 
 drop function if exists public.member_joins_and_renewals(date, text, text);
+-- And this version itself, so re-running the migration is harmless.
+drop function if exists public.member_joins_and_renewals(date, text, text, date);
 
 create function public.member_joins_and_renewals(
   p_month      date default null,   -- any day in the (first) month; null = this month

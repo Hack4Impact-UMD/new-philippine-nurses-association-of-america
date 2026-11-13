@@ -41,7 +41,7 @@ function monthKey(d: Date): string {
 }
 
 /** Matches EARLIEST_START_DATE in scripts/member-joins.ts. */
-const EARLIEST_MONTH = "1900-01-01";
+const EARLIEST_MONTH = "1975-01-01";
 
 /**
  * Who joined or renewed in a range of months, for one national / region /

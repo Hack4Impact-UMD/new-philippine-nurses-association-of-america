@@ -140,18 +140,19 @@ describe("planJoinBackfill", () => {
     expect(plan.skipped.noStartDate).toBe(3);
   });
 
-  it("rejects start dates in the future or before 1900, but keeps today and 1900-01-01", () => {
+  it("rejects start dates in the future or before 1975 (incl. the 1900-01-01 placeholder), but keeps today and 1975-01-01", () => {
     const plan = planJoinBackfill(
       [
         contact({ id: 1, memberSince: "2026-11-14" }),
-        contact({ id: 2, memberSince: "1899-12-31" }),
+        contact({ id: 2, memberSince: "1974-12-31" }),
+        contact({ id: 5, memberSince: "1900-01-01" }),
         contact({ id: 3, memberSince: TODAY }),
-        contact({ id: 4, memberSince: "1900-01-01" }),
+        contact({ id: 4, memberSince: "1975-01-01" }),
       ],
       TODAY
     );
     expect(plan.rows.map((r) => r.memberId)).toEqual(["3", "4"]);
-    expect(plan.skipped.outOfRange).toBe(2);
+    expect(plan.skipped.outOfRange).toBe(3);
   });
 
   it("includes lapsed members, since they did join", () => {
