@@ -113,3 +113,76 @@ $$;
 
 revoke all on function public.backfill_member_joins(jsonb, boolean) from public, anon, authenticated;
 grant execute on function public.backfill_member_joins(jsonb, boolean) to service_role;
+
+-- ---------- member_joins_and_renewals over a month range ----------
+-- With joins now reaching back decades, the list can be asked for a span of
+-- months. Fetching one month per call made a twenty-year range hundreds of
+-- requests. p_to_month makes it one; left null, the call is the same
+-- single-month list as before. A reversed range is read as the same range.
+--
+-- Dropped and recreated rather than replaced: adding a parameter with
+-- create-or-replace would leave the old three-argument version beside it, and
+-- PostgREST could not choose between the two.
+
+drop function if exists public.member_joins_and_renewals(date, text, text);
+
+create function public.member_joins_and_renewals(
+  p_month      date default null,   -- any day in the (first) month; null = this month
+  p_scope_type text default null,   -- 'national' | 'region' | 'chapter'; null = the caller's own
+  p_scope      text default null,   -- region name or chapterId; ignored for 'national'
+  p_to_month   date default null    -- any day in the last month; null = just p_month
+) returns jsonb language plpgsql stable as $$
+declare
+  v_scope_type text;
+  v_scope      text;
+  v_from       date;
+  v_to         date;
+begin
+  if not public.is_admin() then
+    raise exception 'member_joins_and_renewals is restricted to admins' using errcode = '42501';
+  end if;
+
+  select r.scope_type, r.scope into v_scope_type, v_scope
+  from public.resolve_view_scope(p_scope_type, p_scope) r;
+
+  v_from := date_trunc(
+    'month',
+    coalesce(p_month, (now() at time zone 'America/New_York')::date)
+  )::date;
+  v_to := coalesce(date_trunc('month', p_to_month)::date, v_from);
+  if v_to < v_from then
+    select v_to, v_from into v_from, v_to;
+  end if;
+
+  -- Scoped by the member's CURRENT chapter and region, the same keys
+  -- members_read uses, so the list never shows a name or email the caller
+  -- couldn't already open on the members page.
+  return coalesce((
+    select jsonb_agg(
+      jsonb_build_object(
+        'memberId',        m.id,
+        'name',            m."name",
+        'email',           m."email",
+        'membershipLevel', m."membershipLevel",
+        'chapterId',       m."chapterId",
+        'chapterName',     c."name",
+        'region',          m."region",
+        'kind',            e.kind,
+        'occurredAt',      e."occurredAt"
+      )
+      order by e."occurredAt" desc
+    )
+    from public.membership_events e
+    join public.members m on m.id = e."memberId"
+    left join public.chapters c on c.id = m."chapterId"
+    where e."eventMonth" between v_from and v_to
+      and (
+        v_scope_type = 'national'
+        or (v_scope_type = 'region'  and m."region"    is not distinct from v_scope)
+        or (v_scope_type = 'chapter' and m."chapterId" is not distinct from v_scope)
+      )
+  ), '[]'::jsonb);
+end;
+$$;
+
+grant execute on function public.member_joins_and_renewals(date, text, text, date) to authenticated;

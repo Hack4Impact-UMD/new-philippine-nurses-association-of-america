@@ -231,6 +231,61 @@ describe.skipIf(!conn)("backfill_member_joins against the local database", () =>
     }
   });
 
+  /** Our fixture members in member_joins_and_renewals(), as a national admin. */
+  async function listAsAdmin(sql: string, params: unknown[] = []) {
+    await db.query("begin");
+    try {
+      await db.query("set local role authenticated");
+      await db.query(`select set_config('request.jwt.claims', $1, true)`, [
+        JSON.stringify({ role: "authenticated", app_metadata: { user_role: "national_admin" } }),
+      ]);
+      const { rows } = await db.query(sql, params);
+      return ((rows[0].list ?? []) as Array<Record<string, unknown>>)
+        .filter((r) => String(r.memberId).startsWith(P))
+        .map((r) => `${r.kind}:${String(r.memberId).slice(P.length)}`);
+    } finally {
+      await db.query("rollback");
+    }
+  }
+
+  it("lists a whole range of months in one call, newest first", async () => {
+    const plan = planJoinBackfill(contacts(), TODAY);
+    await writeJoinBackfill(service as unknown as RpcClient, plan.rows, { apply: true });
+
+    expect(
+      await listAsAdmin(
+        `select public.member_joins_and_renewals('1998-07-15', 'national', null, '2015-03-02') as list`
+      )
+    ).toEqual(["joined:mid", "joined:recent", "joined:old"]);
+  });
+
+  it("reads a reversed range as the same range", async () => {
+    const plan = planJoinBackfill(contacts(), TODAY);
+    await writeJoinBackfill(service as unknown as RpcClient, plan.rows, { apply: true });
+    expect(
+      await listAsAdmin(
+        `select public.member_joins_and_renewals('2015-03-01', 'national', null, '1998-07-01') as list`
+      )
+    ).toEqual(["joined:mid", "joined:recent", "joined:old"]);
+  });
+
+  it("still lists a single month when called the old way, with three arguments", async () => {
+    const plan = planJoinBackfill(contacts(), TODAY);
+    await writeJoinBackfill(service as unknown as RpcClient, plan.rows, { apply: true });
+    expect(
+      await listAsAdmin(`select public.member_joins_and_renewals('2012-11-05', 'national', null) as list`)
+    ).toEqual(["joined:recent"]);
+    // Through PostgREST too, which must not find two candidate functions.
+    const { error } = await service.rpc("member_joins_and_renewals", {
+      p_month: "2012-11-01",
+      p_scope_type: "national",
+      p_scope: null,
+    });
+    // The service role is not an admin, so the function itself refuses; what
+    // matters is that PostgREST resolved it rather than failing to choose.
+    expect(error?.message).toMatch(/restricted to admins/);
+  });
+
   it("puts backfilled members in the admin list for the month they joined", async () => {
     const plan = planJoinBackfill(contacts(), TODAY);
     await writeJoinBackfill(service as unknown as RpcClient, plan.rows, { apply: true });
